@@ -206,3 +206,62 @@ inline t_mono_property_get_name mono_property_get_name;
 
 typedef void (*t_mono_free)(void* ptr);
 inline t_mono_free mono_free;
+
+typedef uint32_t(*t_mono_gchandle_new)(
+	MonoObject* obj,
+	int pinned
+	);
+inline t_mono_gchandle_new mono_gchandle_new;
+
+typedef MonoObject* (*t_mono_gchandle_get_target)(
+	uint32_t gchandle
+	);
+inline t_mono_gchandle_get_target mono_gchandle_get_target;
+
+typedef void (*t_mono_gchandle_free)(
+	uint32_t gchandle
+	);
+inline t_mono_gchandle_free mono_gchandle_free;
+
+typedef void* MonoGCHandle;
+
+typedef MonoGCHandle(*t_mono_gchandle_new_v2)(
+	MonoObject* obj,
+	int pinned
+	);
+inline t_mono_gchandle_new_v2 mono_gchandle_new_v2;
+
+typedef MonoObject* (*t_mono_gchandle_get_target_v2)(
+	MonoGCHandle gchandle
+	);
+inline t_mono_gchandle_get_target_v2 mono_gchandle_get_target_v2;
+
+typedef void (*t_mono_gchandle_free_v2)(
+	MonoGCHandle gchandle
+	);
+inline t_mono_gchandle_free_v2 mono_gchandle_free_v2;
+
+typedef struct MonoMethodSignature {
+
+} MonoMethodSignature;
+
+typedef MonoMethodSignature* (*t_mono_method_signature)(MonoMethod* method);
+inline t_mono_method_signature mono_method_signature;
+
+typedef uint32_t(*t_mono_signature_get_param_count)(MonoMethodSignature* sig);
+inline t_mono_signature_get_param_count mono_signature_get_param_count;
+
+typedef MonoType* (*t_mono_signature_get_params)(MonoMethodSignature* sig, void** iter);
+inline t_mono_signature_get_params mono_signature_get_params;
+
+typedef void (*t_mono_method_get_param_names)(MonoMethod* method, const char** names);
+inline t_mono_method_get_param_names mono_method_get_param_names;
+
+typedef int (*t_mono_class_is_valuetype)(MonoClass* klass);
+inline t_mono_class_is_valuetype mono_class_is_valuetype;
+typedef MonoType* (*t_mono_signature_get_return_type)(
+	MonoMethodSignature* sig
+	);
+
+inline t_mono_signature_get_return_type
+mono_signature_get_return_type;

@@ -1,51 +1,130 @@
 #include "drawing.h"
 
-namespace Drawing {
-	void DrawCachedObjects(ImDrawList* pDrawList) {
-		if (!Globals::highlightObj || !Explorer::pSelectedClass) return;
-        std::cout << "here \n";
-        Camera* pCam = Camera::Get();
-        std::cout << "here 1\n";
-        if (!pCam) return;
-        std::cout << "here 2\n";
-		Type* pType = Type::Resolve(Explorer::pSelectedClass);
-        std::cout << "here 3\n";
-        if (!pType) return;
-        std::cout << "here 4\n";
-		Array<Object*>* objects =
-			UObject::FindObjectsByType<Object>(pType);
-        std::cout << "here 5\n";
-        if (objects)
-        {
-            int count = objects->GetLength();
-            std::cout << "here 6\n";
-            if (count <= 0) return;
-            std::cout << "Count: " << count << "\n";
-            for (int i = 0; i < count; i++)
-            {
-                Component* object =
-                    reinterpret_cast<Component*>(objects->GetValue(i));
-                std::cout << "here 7\n";
-                if (!object)
-                    continue;
-                std::cout << "here 8\n";
-                Transform* pTrans = object->GetTransform();
-                std::cout << "here 9\n";
-                if (!pTrans) continue;
-                std::cout << "here 10\n";
-                Vector3 pos = pTrans->GetPosition();
-                std::cout << "here 11\n";
-                std::cout << "X: " << pos.x << " Y: " << pos.y << " Z: " << pos.z << "\n";
-                Vector2 screenPos;
-                if (!pCam->WorldToScreen(screenPos, pos)) continue;
-                std::cout << "here 12\n";
-                pDrawList->AddText({ screenPos.x, screenPos.y }, ImColor(255, 0, 0), "Here is an object");
-                std::cout << "here 13\n";
-            }
-        }
+namespace Drawing
+{
+	MonoGCHandle objectsHandle = nullptr;
 
+	void ClearObjectCache()
+	{
+		if (objectsHandle)
+		{
+			mono_gchandle_free_v2(objectsHandle);
+			objectsHandle = nullptr;
+		}
 	}
-	void Render(ImDrawList* pDrawList) {
+
+	void DrawCachedObjects(ImDrawList* pDrawList)
+	{
+		if (!Globals::highlightObj || !Explorer::pSelectedClass)
+		{
+			ClearObjectCache();
+			return;
+		}
+
+		if (!Explorer::pSelectedType)
+			return;
+
+		Camera* pCam = Camera::Get();
+
+		if (!pCam)
+			return;
+
+		if (!objectsHandle || Globals::bNewType)
+		{
+			if (objectsHandle)
+			{
+				mono_gchandle_free_v2(objectsHandle);
+				objectsHandle = nullptr;
+			}
+
+			Array<Object*>* objects =
+				UObject::FindObjectsByType<Object*>(
+					Explorer::pSelectedType
+				);
+
+			if (objects)
+			{
+				objectsHandle =
+					mono_gchandle_new_v2(
+						reinterpret_cast<MonoObject*>(objects),
+						0
+					);
+			}
+
+			Globals::bNewType = false;
+		}
+
+		if (!objectsHandle)
+			return;
+
+		Array<Object*>* pObjects =
+			reinterpret_cast<Array<Object*>*>(
+				mono_gchandle_get_target_v2(
+					objectsHandle
+				)
+				);
+
+		if (!pObjects)
+			return;
+
+		int count =
+			pObjects->GetLength();
+
+		if (count <= 0)
+			return;
+
+		for (int i = 0; i < count; i++)
+		{
+			Component* object =
+				reinterpret_cast<Component*>(
+					pObjects->GetValue(i)
+					);
+
+			if (!object)
+				continue;
+
+			if (!object->IsValid())
+				continue;
+
+			Transform* pTrans =
+				object->GetTransform();
+
+			if (!pTrans)
+				continue;
+
+			Vector3 pos =
+				pTrans->GetPosition();
+
+			Vector2 screenPos;
+
+			if (!pCam->WorldToScreen(
+				screenPos,
+				pos
+			))
+				continue;
+
+			std::string objTextFull =
+				std::to_string(i) +
+				" - " +
+				Explorer::pSelectedClass->GetName();
+
+			pDrawList->AddText(
+				{
+					screenPos.x,
+					screenPos.y
+				},
+				ImColor(
+					255,
+					255,
+					255
+				),
+				objTextFull.c_str()
+			);
+		}
+	}
+
+	void Render(ImDrawList* pDrawList)
+	{
 		DrawCachedObjects(pDrawList);
 	}
 }

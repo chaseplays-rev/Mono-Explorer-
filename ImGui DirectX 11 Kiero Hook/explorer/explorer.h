@@ -7,6 +7,8 @@ namespace Explorer {
     extern Method* pSelectedMethod;
     extern Field* pSelectedField;
     extern Type* pSelectedType;
+    extern Method* pInspectedMethod;
+    extern bool bMethodInspectorOpen;
 
     bool FindClass(const char* pAssembly, const char* pNamespace, const char* pName);
     bool FindClassFromSearch(const char* pSearch);

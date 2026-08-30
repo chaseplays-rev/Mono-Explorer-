@@ -3,12 +3,18 @@
 std::string Mono::managedDirectory;
 
 std::vector<std::pair<std::string, Assembly*>> Mono::assemblyCache;
+std::vector<std::pair<std::string, Method*>> Mono::methodCache;
+std::vector<std::pair<std::string, Class*>> Mono::klassCache;
 
 void Mono::Attach()
 {
-	domain = mono_get_root_domain();
+	if (!domain)
+		domain = mono_get_root_domain();
+
+	if (!domain)
+		return;
+
 	mono_thread_attach(domain);
-	mono_thread_attach(mono_domain_get());
 }
 
 void Mono::Initialize()
@@ -45,21 +51,46 @@ Class* Class::Resolve(
 
 	if (!*Asm || !*Klass)
 		return nullptr;
+
+	std::string key =
+		std::string(Asm) + "." +
+		std::string(Namespace) + "." +
+		std::string(Klass);
+
+	for (auto& entry : Mono::klassCache)
+	{
+		if (entry.first == key)
+			return entry.second;
+	}
+
 	Assembly* assembly = Assembly::Resolve(Asm);
+
 	if (!assembly)
 		return nullptr;
+
 	MonoImage* image = assembly->GetImage();
+
 	if (!image)
 		return nullptr;
-	MonoClass* klass =
-		mono_class_from_name(
-			image,
-			Namespace,
-			Klass
-		);
+
+	MonoClass* klass = mono_class_from_name(
+		image,
+		Namespace,
+		Klass
+	);
+
 	if (!klass)
 		return nullptr;
-	return reinterpret_cast<Class*>(klass);
+
+	Class* pKlass =
+		reinterpret_cast<Class*>(klass);
+
+	Mono::klassCache.push_back({
+		key,
+		pKlass
+		});
+
+	return pKlass;
 }
 
 Field* Class::GetField(const char* Name)
@@ -69,7 +100,37 @@ Field* Class::GetField(const char* Name)
 
 Method* Class::GetMethod(const char* Name, int pCount)
 {
-	return (Method*)mono_class_get_method_from_name(this, Name, pCount);
+	if (!Name)
+		return nullptr;
+
+	std::string key =
+		std::to_string(reinterpret_cast<uintptr_t>(this)) +
+		"." +
+		Name +
+		"." +
+		std::to_string(pCount);
+
+	for (auto& entry : Mono::methodCache)
+	{
+		if (entry.first == key)
+			return entry.second;
+	}
+
+	MonoMethod* method =
+		mono_class_get_method_from_name(this, Name, pCount);
+
+	if (!method)
+		return nullptr;
+
+	Method* pMethod =
+		reinterpret_cast<Method*>(method);
+
+	Mono::methodCache.push_back({
+		key,
+		pMethod
+		});
+
+	return pMethod;
 }
 
 const char* Class::GetName()
@@ -96,22 +157,13 @@ Assembly* Assembly::Resolve(
 	if (!Mono::domain)
 		return nullptr;
 
-	//
-	// Normalize:
-	//
-	// Assembly-CSharp.dll
-	// ->
-	// Assembly-CSharp
-	//
 	std::string assemblyName =
 		Mono::NormalizeAssemblyName(Name);
 
 	if (assemblyName.empty())
 		return nullptr;
 
-	//
-	// Already resolved?
-	//
+	
 	Assembly* cached =
 		Mono::FindCachedAssembly(
 			assemblyName.c_str()
@@ -120,24 +172,12 @@ Assembly* Assembly::Resolve(
 	if (cached)
 		return cached;
 
-	//
-	// Haven't found Managed directory yet?
-	//
 	if (Mono::managedDirectory.empty())
 	{
 		if (!Mono::FindManagedDirectory())
 			return nullptr;
 	}
 
-	//
-	// Build:
-	//
-	// C:\Game\Game_Data\Managed\
-	// +
-	// Assembly-CSharp
-	// +
-	// .dll
-	//
 	std::string assemblyPath =
 		Mono::managedDirectory +
 		assemblyName +
@@ -157,10 +197,6 @@ Assembly* Assembly::Resolve(
 			monoAssembly
 			);
 
-	//
-	// Cache only because the user actually
-	// requested this assembly.
-	//
 	Mono::assemblyCache.emplace_back(
 		assemblyName,
 		assembly
@@ -174,9 +210,30 @@ MonoImage* Assembly::GetImage()
 	return (MonoImage*)mono_assembly_get_image(this);
 }
 
-Method* Method::Resolve(const char* Asm, const char* Namespace, const char* Klass, const char* Name, int pCount)
+Method* Method::Resolve(
+	const char* Asm,
+	const char* Namespace,
+	const char* Klass,
+	const char* Name,
+	int pCount)
 {
-	return (Method*)mono_class_get_method_from_name(Class::Resolve(Asm, Namespace, Klass), Name, pCount);
+	if (!Asm || !Namespace || !Klass || !Name)
+		return nullptr;
+
+	Class* pKlass =
+		Class::Resolve(
+			Asm,
+			Namespace,
+			Klass
+		);
+
+	if (!pKlass)
+		return nullptr;
+
+	return pKlass->GetMethod(
+		Name,
+		pCount
+	);
 }
 
 void* Method::GetAddress()

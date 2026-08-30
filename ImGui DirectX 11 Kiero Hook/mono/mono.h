@@ -17,6 +17,9 @@ namespace Mono {
 	extern std::string managedDirectory;
 
 	extern std::vector<std::pair<std::string, Assembly*>> assemblyCache;
+	extern std::vector<std::pair<std::string, Class*>> klassCache;
+	extern std::vector<std::pair<std::string, Method*>> methodCache;
+
 	bool FindManagedDirectory();
 	Assembly* FindCachedAssembly(const char* Name);
 	std::string NormalizeAssemblyName(const char* Name);

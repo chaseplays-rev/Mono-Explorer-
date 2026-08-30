@@ -7,9 +7,15 @@ namespace Explorer
     Field* pSelectedField;
     Type* pSelectedType;
 
+    Method* pInspectedMethod;
+    bool bMethodInspectorOpen;
+
     bool FindClass(const char* pAssembly, const char* pNamespace, const char* pName) {
         pSelectedClass = Class::Resolve(pAssembly, pNamespace, pName);
-        return pSelectedClass;
+        if (!pSelectedClass) return false;
+        pSelectedType = Type::Resolve(pSelectedClass);
+        if (!pSelectedType) return false;
+        return true;
     }
     bool FindClassFromSearch(const char* pSearch)
     {

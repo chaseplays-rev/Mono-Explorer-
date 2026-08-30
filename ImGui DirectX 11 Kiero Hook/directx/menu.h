@@ -6,4 +6,5 @@ bool SidebarButton(const char* label, bool selected);
 
 namespace Menu {
 	void Draw();
+	void DrawMethodInspector();
 }

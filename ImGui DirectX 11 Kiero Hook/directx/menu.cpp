@@ -97,6 +97,344 @@ bool SidebarButton(const char* label, bool selected)
     return clicked;
 }
 
+void Menu::DrawMethodInspector()
+{
+    if (!Explorer::bMethodInspectorOpen ||
+        !Explorer::pInspectedMethod)
+        return;
+
+    Method* method =
+        Explorer::pInspectedMethod;
+
+    const char* methodName =
+        mono_method_get_name(method);
+
+    MonoClass* ownerClass =
+        mono_method_get_class(method);
+
+    const char* className =
+        ownerClass
+        ? mono_class_get_name(ownerClass)
+        : nullptr;
+
+    MonoMethodSignature* signature =
+        mono_method_signature(method);
+
+    uint32_t paramCount =
+        signature
+        ? mono_signature_get_param_count(signature)
+        : 0;
+
+    std::vector<const char*> paramNames(paramCount);
+
+    if (paramCount > 0)
+    {
+        mono_method_get_param_names(
+            method,
+            paramNames.data()
+        );
+    }
+
+    std::vector<std::string> paramTypes;
+    paramTypes.reserve(paramCount);
+
+    void* paramIter = nullptr;
+
+    for (uint32_t i = 0; i < paramCount; i++)
+    {
+        MonoType* type =
+            mono_signature_get_params(
+                signature,
+                &paramIter
+            );
+
+        if (!type)
+        {
+            paramTypes.push_back("unknown");
+            continue;
+        }
+
+        char* rawTypeName =
+            mono_type_get_name(type);
+
+        std::string typeName =
+            rawTypeName
+            ? rawTypeName
+            : "unknown";
+
+        if (rawTypeName)
+            mono_free(rawTypeName);
+
+        Class* paramClass =
+            reinterpret_cast<Type*>(type)->GetClass();
+
+        if (paramClass)
+        {
+            bool isValueType =
+                mono_class_is_valuetype(
+                    paramClass
+                ) != 0;
+
+            if (!isValueType)
+            {
+                if (typeName.empty() ||
+                    typeName.back() != '*')
+                {
+                    typeName += "*";
+                }
+            }
+        }
+
+        paramTypes.push_back(typeName);
+    }
+
+    std::string returnTypeName = "unknown";
+
+    if (signature)
+    {
+        MonoType* returnType =
+            mono_signature_get_return_type(
+                signature
+            );
+
+        if (returnType)
+        {
+            char* rawReturnType =
+                mono_type_get_name(
+                    returnType
+                );
+
+            if (rawReturnType)
+            {
+                returnTypeName =
+                    rawReturnType;
+
+                mono_free(
+                    rawReturnType
+                );
+            }
+
+            Class* returnClass =
+                reinterpret_cast<Type*>(
+                    returnType
+                    )->GetClass();
+
+            if (returnClass)
+            {
+                bool isValueType =
+                    mono_class_is_valuetype(
+                        returnClass
+                    ) != 0;
+
+                if (!isValueType &&
+                    !returnTypeName.empty() &&
+                    returnTypeName.back() != '*')
+                {
+                    returnTypeName += "*";
+                }
+            }
+        }
+    }
+
+    std::string methodSignature;
+
+    methodSignature += returnTypeName;
+    methodSignature += " ";
+
+    methodSignature +=
+        methodName
+        ? methodName
+        : "<Unknown Method>";
+
+    methodSignature += "(";
+
+    for (uint32_t i = 0; i < paramCount; i++)
+    {
+        if (i > 0)
+            methodSignature += ", ";
+
+        methodSignature +=
+            paramTypes[i];
+
+        if (i < paramNames.size() &&
+            paramNames[i] &&
+            *paramNames[i])
+        {
+            methodSignature += " ";
+            methodSignature +=
+                paramNames[i];
+        }
+    }
+
+    methodSignature += ")";
+
+    ImGui::SetNextWindowSize(
+        ImVec2(500.0f, 320.0f),
+        ImGuiCond_FirstUseEver
+    );
+
+    if (!ImGui::Begin(
+        "Method Inspector",
+        &Explorer::bMethodInspectorOpen,
+        ImGuiWindowFlags_NoCollapse
+    ))
+    {
+        ImGui::End();
+        return;
+    }
+
+    const float padding = 18.0f;
+
+    ImGui::Dummy(
+        ImVec2(0, 3)
+    );
+
+    ImGui::SetCursorPosX(
+        padding
+    );
+
+    ImGui::PushTextWrapPos(
+        ImGui::GetWindowWidth() - padding
+    );
+
+    ImGui::TextWrapped(
+        "%s",
+        methodSignature.c_str()
+    );
+
+    ImGui::PopTextWrapPos();
+
+    ImGui::Dummy(
+        ImVec2(0, 8)
+    );
+
+    ImGui::SetCursorPosX(
+        padding
+    );
+
+    ImGui::Separator();
+
+    ImGui::Dummy(
+        ImVec2(0, 10)
+    );
+
+    ImGui::SetCursorPosX(
+        padding
+    );
+
+    ImGui::BeginChild(
+        "##MethodInfo",
+        ImVec2(
+            ImGui::GetContentRegionAvail().x - padding,
+            130.0f
+        ),
+        true
+    );
+
+    ImGui::Dummy(
+        ImVec2(0, 5)
+    );
+
+    ImGui::SetCursorPosX(12);
+
+    ImGui::Text(
+        "Method Information"
+    );
+
+    ImGui::Dummy(
+        ImVec2(0, 7)
+    );
+
+    ImGui::SetCursorPosX(12);
+    ImGui::TextDisabled(
+        "Method"
+    );
+
+    ImGui::SameLine(120);
+
+    ImGui::Text(
+        "%s",
+        methodName
+        ? methodName
+        : ""
+    );
+
+    ImGui::SetCursorPosX(12);
+    ImGui::TextDisabled(
+        "Class"
+    );
+
+    ImGui::SameLine(120);
+
+    ImGui::Text(
+        "%s",
+        className
+        ? className
+        : ""
+    );
+
+    ImGui::SetCursorPosX(12);
+    ImGui::TextDisabled(
+        "Parameters"
+    );
+
+    ImGui::SameLine(120);
+
+    ImGui::Text(
+        "%u",
+        paramCount
+    );
+
+    ImGui::SetCursorPosX(12);
+    ImGui::TextDisabled(
+        "Return"
+    );
+
+    ImGui::SameLine(120);
+
+    ImGui::Text(
+        "%s",
+        returnTypeName.c_str()
+    );
+
+    ImGui::SetCursorPosX(12);
+    ImGui::TextDisabled(
+        "MonoMethod"
+    );
+
+    ImGui::SameLine(120);
+
+    ImGui::Text(
+        "%p",
+        method
+    );
+
+    ImGui::EndChild();
+
+    if (paramCount == 0)
+    {
+        ImGui::Dummy(
+            ImVec2(0, 8)
+        );
+
+        ImGui::SetCursorPosX(
+            padding
+        );
+
+        if (ImGui::Button(
+            "Call",
+            ImVec2(
+                160.0f,
+                36.0f
+            )
+        ))
+        {
+        }
+    }
+
+    ImGui::End();
+}
+
 void Menu::Draw()
 {
     ImGui::SetNextWindowSize(ImVec2(760, 500), ImGuiCond_FirstUseEver);
@@ -118,12 +456,12 @@ void Menu::Draw()
     ImGui::Dummy(ImVec2(0, 12));
 
     ImGui::SetCursorPosX(14);
-    if (SidebarButton("Inspect", Globals::currentTab == 0))
-        Globals::currentTab = 0;
-
-    ImGui::SetCursorPosX(14);
     if (SidebarButton("Search", Globals::currentTab == 1))
         Globals::currentTab = 1;
+
+    ImGui::SetCursorPosX(14);
+    if (SidebarButton("Inspect", Globals::currentTab == 0))
+        Globals::currentTab = 0;
 
     if (Globals::validClassFound && Explorer::pSelectedClass)
     {
@@ -131,6 +469,11 @@ void Menu::Draw()
 
         if (SidebarButton("Utilities", Globals::currentTab == 2))
             Globals::currentTab = 2;
+
+        ImGui::SetCursorPosX(14);
+
+        if (SidebarButton("Objects", Globals::currentTab == 3))
+            Globals::currentTab = 3;
     }
 
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 75);
@@ -235,11 +578,33 @@ void Menu::Draw()
                     bool selected =
                         Explorer::pSelectedMethod == currentMethod;
 
+                    ImGui::PushID(method);
+
                     if (ImGui::Selectable(name, selected))
                     {
                         Explorer::pSelectedMethod = currentMethod;
                         Explorer::pSelectedField = nullptr;
                     }
+
+                    if (ImGui::BeginPopupContextItem("##MethodContext"))
+                    {
+                        if (ImGui::Selectable(
+                            "Inspect Method",
+                            false,
+                            0,
+                            ImVec2(140.0f, 28.0f)
+                        ))
+                        {
+                            Explorer::pSelectedMethod = currentMethod;
+                            Explorer::pSelectedField = nullptr;
+                            Explorer::pInspectedMethod = currentMethod;
+                            Explorer::bMethodInspectorOpen = true;
+                        }
+
+                        ImGui::EndPopup();
+                    }
+
+                    ImGui::PopID();
                 }
             }
 
@@ -366,6 +731,8 @@ void Menu::Draw()
                 Explorer::FindClassFromSearch(
                     Globals::searchBuffer
                 );
+            if (!Globals::bNewType)
+                Globals::bNewType = true;
         }
 
         ImGui::EndChild();
@@ -512,4 +879,6 @@ void Menu::Draw()
 
     ImGui::EndChild();
     ImGui::End();
+
+    DrawMethodInspector();
 }

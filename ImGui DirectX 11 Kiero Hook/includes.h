@@ -15,4 +15,5 @@ namespace Globals {
 	inline int currentTab = 0;
 	inline char searchBuffer[256] = "", inspectBuffer[256] = "";
 	inline bool autoRefresh = true, showInherited = true, caseSensitive = false, validClassFound = false, highlightObj = false;
+	inline bool bNewType = false;
 }

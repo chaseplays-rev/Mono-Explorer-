@@ -91,5 +91,66 @@ namespace API {
 		mono_free =
 			reinterpret_cast<t_mono_free>(
 				_MonoMemory.GetExport(L"mono_free"));
+		mono_gchandle_new =
+			reinterpret_cast<t_mono_gchandle_new>(
+				_MonoMemory.GetExport(L"mono_gchandle_new")
+				);
+
+		mono_class_is_valuetype =
+			reinterpret_cast<t_mono_class_is_valuetype>(
+				_MonoMemory.GetExport(L"mono_class_is_valuetype")
+				);
+
+		mono_signature_get_return_type =
+			reinterpret_cast<t_mono_signature_get_return_type>(
+				_MonoMemory.GetExport(
+					L"mono_signature_get_return_type"
+				)
+				);
+
+		mono_gchandle_get_target =
+			reinterpret_cast<t_mono_gchandle_get_target>(
+				_MonoMemory.GetExport(L"mono_gchandle_get_target")
+				);
+
+		mono_gchandle_free =
+			reinterpret_cast<t_mono_gchandle_free>(
+				_MonoMemory.GetExport(L"mono_gchandle_free")
+				);
+
+		mono_gchandle_new_v2 =
+			reinterpret_cast<t_mono_gchandle_new_v2>(
+				_MonoMemory.GetExport(L"mono_gchandle_new_v2")
+				);
+
+		mono_gchandle_get_target_v2 =
+			reinterpret_cast<t_mono_gchandle_get_target_v2>(
+				_MonoMemory.GetExport(L"mono_gchandle_get_target_v2")
+				);
+
+		mono_gchandle_free_v2 =
+			reinterpret_cast<t_mono_gchandle_free_v2>(
+				_MonoMemory.GetExport(L"mono_gchandle_free_v2")
+				);
+
+		mono_method_signature =
+			reinterpret_cast<t_mono_method_signature>(
+				_MonoMemory.GetExport(L"mono_method_signature")
+				);
+
+		mono_signature_get_param_count =
+			reinterpret_cast<t_mono_signature_get_param_count>(
+				_MonoMemory.GetExport(L"mono_signature_get_param_count")
+				);
+
+		mono_signature_get_params =
+			reinterpret_cast<t_mono_signature_get_params>(
+				_MonoMemory.GetExport(L"mono_signature_get_params")
+				);
+
+		mono_method_get_param_names =
+			reinterpret_cast<t_mono_method_get_param_names>(
+				_MonoMemory.GetExport(L"mono_method_get_param_names")
+				);
 	}
 }
