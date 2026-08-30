@@ -2,129 +2,95 @@
 
 namespace Drawing
 {
-	MonoGCHandle objectsHandle = nullptr;
+    void DrawCachedObjects(ImDrawList* pDrawList)
+    {
+        if (!Globals::highlightObj ||
+            !Explorer::pSelectedClass)
+        {
+            return;
+        }
 
-	void ClearObjectCache()
-	{
-		if (objectsHandle)
-		{
-			mono_gchandle_free_v2(objectsHandle);
-			objectsHandle = nullptr;
-		}
-	}
+        if (!Menu::objectsHandle)
+            return;
 
-	void DrawCachedObjects(ImDrawList* pDrawList)
-	{
-		if (!Globals::highlightObj || !Explorer::pSelectedClass)
-		{
-			ClearObjectCache();
-			return;
-		}
+        Camera* pCam =
+            Camera::Get();
 
-		if (!Explorer::pSelectedType)
-			return;
+        if (!pCam)
+            return;
 
-		Camera* pCam = Camera::Get();
+        Array<Object*>* pObjects =
+            reinterpret_cast<Array<Object*>*>(
+                mono_gchandle_get_target_v2(
+                    Menu::objectsHandle
+                )
+                );
 
-		if (!pCam)
-			return;
+        if (!pObjects)
+            return;
 
-		if (!objectsHandle || Globals::bNewType)
-		{
-			if (objectsHandle)
-			{
-				mono_gchandle_free_v2(objectsHandle);
-				objectsHandle = nullptr;
-			}
+        int count =
+            pObjects->GetLength();
 
-			Array<Object*>* objects =
-				UObject::FindObjectsByType<Object*>(
-					Explorer::pSelectedType
-				);
+        if (count <= 0)
+            return;
 
-			if (objects)
-			{
-				objectsHandle =
-					mono_gchandle_new_v2(
-						reinterpret_cast<MonoObject*>(objects),
-						0
-					);
-			}
+        for (int i = 0; i < count; i++)
+        {
+            Component* object =
+                reinterpret_cast<Component*>(
+                    pObjects->GetValue(i)
+                    );
 
-			Globals::bNewType = false;
-		}
+            if (!object)
+                continue;
 
-		if (!objectsHandle)
-			return;
+            if (!object->IsValid())
+                continue;
 
-		Array<Object*>* pObjects =
-			reinterpret_cast<Array<Object*>*>(
-				mono_gchandle_get_target_v2(
-					objectsHandle
-				)
-				);
+            Transform* pTrans =
+                object->GetTransform();
 
-		if (!pObjects)
-			return;
+            if (!pTrans)
+                continue;
 
-		int count =
-			pObjects->GetLength();
+            Vector3 pos =
+                pTrans->GetPosition();
 
-		if (count <= 0)
-			return;
+            Vector2 screenPos;
 
-		for (int i = 0; i < count; i++)
-		{
-			Component* object =
-				reinterpret_cast<Component*>(
-					pObjects->GetValue(i)
-					);
+            if (!pCam->WorldToScreen(
+                screenPos,
+                pos
+            ))
+            {
+                continue;
+            }
 
-			if (!object)
-				continue;
+            std::string objTextFull =
+                std::to_string(i) +
+                " - " +
+                Explorer::pSelectedClass->GetName();
 
-			if (!object->IsValid())
-				continue;
+            pDrawList->AddText(
+                {
+                    screenPos.x,
+                    screenPos.y
+                },
+                ImColor(
+                    255,
+                    255,
+                    255
+                ),
+                objTextFull.c_str()
+            );
+        }
+    }
 
-			Transform* pTrans =
-				object->GetTransform();
-
-			if (!pTrans)
-				continue;
-
-			Vector3 pos =
-				pTrans->GetPosition();
-
-			Vector2 screenPos;
-
-			if (!pCam->WorldToScreen(
-				screenPos,
-				pos
-			))
-				continue;
-
-			std::string objTextFull =
-				std::to_string(i) +
-				" - " +
-				Explorer::pSelectedClass->GetName();
-
-			pDrawList->AddText(
-				{
-					screenPos.x,
-					screenPos.y
-				},
-				ImColor(
-					255,
-					255,
-					255
-				),
-				objTextFull.c_str()
-			);
-		}
-	}
-
-	void Render(ImDrawList* pDrawList)
-	{
-		DrawCachedObjects(pDrawList);
-	}
+    void Render(ImDrawList* pDrawList)
+    {
+        DrawCachedObjects(
+            pDrawList
+        );
+    }
 }

@@ -54,6 +54,11 @@ struct Method : public MonoMethod {
 	static T Call(const char* Asm, const char* Namespace, const char* Klass, const char* Name, int pCount) {
 		return reinterpret_cast<T>(mono_compile_method(Method::Resolve(Asm, Namespace, Klass, Name, pCount)));
 	}
+
+	template<class T>
+	T InternalCall() {
+		return reinterpret_cast<T>(mono_compile_method(this));
+	}
 	
 	//Call Method That Returns A Value Type {structs, int's, etc...}
 	//If Method Is Static, Set Object Parameter To nullptr Or Use Call<T>()

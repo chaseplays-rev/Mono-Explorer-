@@ -1,5 +1,51 @@
 ﻿#include "menu.h"
 
+MonoGCHandle Menu::objectsHandle = nullptr;
+
+void Menu::ClearObjectSnapshot()
+{
+    Explorer::pSelectedObject = nullptr;
+
+    if (!objectsHandle)
+        return;
+
+    mono_gchandle_free_v2(
+        objectsHandle
+    );
+
+    objectsHandle = nullptr;
+}
+
+void Menu::RefreshObjectSnapshot()
+{
+    Explorer::pSelectedObject = nullptr;
+
+    ClearObjectSnapshot();
+
+    if (!Globals::validClassFound ||
+        !Explorer::pSelectedClass ||
+        !Explorer::pSelectedType)
+    {
+        return;
+    }
+
+    Array<Object*>* objects =
+        UObject::FindObjectsByType<Object*>(
+            Explorer::pSelectedType
+        );
+
+    if (!objects)
+        return;
+
+    objectsHandle =
+        mono_gchandle_new_v2(
+            reinterpret_cast<MonoObject*>(
+                objects
+                ),
+            0
+        );
+}
+
 void SetupModernStyle()
 {
     ImGuiStyle& style = ImGui::GetStyle();
@@ -97,6 +143,719 @@ bool SidebarButton(const char* label, bool selected)
     return clicked;
 }
 
+static std::string MonoStringToUtf8(
+    MonoObject* object
+);
+
+static std::string FormatEnumReturn(
+    MonoObject* result,
+    MonoClass* enumClass
+)
+{
+    if (!result || !enumClass)
+        return "Returned: null";
+
+    std::string enumName = "Unknown";
+
+    MonoObject* exception = nullptr;
+
+    MonoString* enumString =
+        mono_object_to_string(
+            result,
+            &exception
+        );
+
+    if (enumString && !exception)
+    {
+        enumName =
+            MonoStringToUtf8(
+                reinterpret_cast<MonoObject*>(
+                    enumString
+                    )
+            );
+    }
+
+    MonoType* baseType =
+        mono_class_enum_basetype(
+            enumClass
+        );
+
+    if (!baseType)
+    {
+        return
+            "Returned: " +
+            enumName;
+    }
+
+    void* value =
+        mono_object_unbox(
+            result
+        );
+
+    if (!value)
+    {
+        return
+            "Returned: " +
+            enumName;
+    }
+
+    int type =
+        mono_type_get_type(
+            baseType
+        );
+
+    std::string numericValue;
+
+    switch (type)
+    {
+    case MONO_TYPE_I1:
+        numericValue =
+            std::to_string(
+                static_cast<int>(
+                    *reinterpret_cast<int8_t*>(value)
+                    )
+            );
+        break;
+
+    case MONO_TYPE_U1:
+        numericValue =
+            std::to_string(
+                static_cast<unsigned int>(
+                    *reinterpret_cast<uint8_t*>(value)
+                    )
+            );
+        break;
+
+    case MONO_TYPE_I2:
+        numericValue =
+            std::to_string(
+                *reinterpret_cast<int16_t*>(value)
+            );
+        break;
+
+    case MONO_TYPE_U2:
+        numericValue =
+            std::to_string(
+                *reinterpret_cast<uint16_t*>(value)
+            );
+        break;
+
+    case MONO_TYPE_I4:
+        numericValue =
+            std::to_string(
+                *reinterpret_cast<int32_t*>(value)
+            );
+        break;
+
+    case MONO_TYPE_U4:
+        numericValue =
+            std::to_string(
+                *reinterpret_cast<uint32_t*>(value)
+            );
+        break;
+
+    case MONO_TYPE_I8:
+        numericValue =
+            std::to_string(
+                *reinterpret_cast<int64_t*>(value)
+            );
+        break;
+
+    case MONO_TYPE_U8:
+        numericValue =
+            std::to_string(
+                *reinterpret_cast<uint64_t*>(value)
+            );
+        break;
+
+    default:
+        return
+            "Returned: " +
+            enumName;
+    }
+
+    return
+        "Returned: " +
+        enumName +
+        " (" +
+        numericValue +
+        ")";
+}
+
+static std::string MonoStringToUtf8(
+    MonoObject* object
+)
+{
+    if (!object)
+        return "";
+
+    String* str =
+        reinterpret_cast<String*>(object);
+
+    wchar_t* wide =
+        str->c_str();
+
+    if (!wide)
+        return "";
+
+    int size =
+        WideCharToMultiByte(
+            CP_UTF8,
+            0,
+            wide,
+            -1,
+            nullptr,
+            0,
+            nullptr,
+            nullptr
+        );
+
+    if (size <= 0)
+        return "";
+
+    std::string result(
+        size - 1,
+        '\0'
+    );
+
+    WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        wide,
+        -1,
+        result.data(),
+        size,
+        nullptr,
+        nullptr
+    );
+
+    return result;
+}
+
+static std::string FormatMethodReturn(
+    MonoObject* result,
+    MonoType* returnType,
+    const std::string& typeName
+)
+{
+    if (!returnType)
+        return "Returned: unknown";
+
+    int type =
+        mono_type_get_type(
+            returnType
+        );
+
+    if (type == MONO_TYPE_VOID)
+        return "Returned: void";
+
+    if (!result)
+        return "Returned: null";
+
+    Class* returnClass =
+        reinterpret_cast<Type*>(
+            returnType
+            )->GetClass();
+
+    // Enum
+    if (returnClass &&
+        mono_class_is_enum(returnClass))
+    {
+        std::string enumName =
+            "Unknown";
+
+        MonoObject* exception =
+            nullptr;
+
+        MonoString* enumString =
+            mono_object_to_string(
+                result,
+                &exception
+            );
+
+        if (enumString &&
+            !exception)
+        {
+            enumName =
+                MonoStringToUtf8(
+                    reinterpret_cast<MonoObject*>(
+                        enumString
+                        )
+                );
+        }
+
+        MonoType* baseType =
+            mono_class_enum_basetype(
+                returnClass
+            );
+
+        void* value =
+            mono_object_unbox(
+                result
+            );
+
+        if (!baseType ||
+            !value)
+        {
+            return
+                "Returned: " +
+                enumName;
+        }
+
+        int baseTypeEnum =
+            mono_type_get_type(
+                baseType
+            );
+
+        std::string numericValue;
+
+        switch (baseTypeEnum)
+        {
+        case MONO_TYPE_I1:
+        {
+            numericValue =
+                std::to_string(
+                    static_cast<int>(
+                        *reinterpret_cast<int8_t*>(
+                            value
+                            )
+                        )
+                );
+
+            break;
+        }
+
+        case MONO_TYPE_U1:
+        {
+            numericValue =
+                std::to_string(
+                    static_cast<unsigned int>(
+                        *reinterpret_cast<uint8_t*>(
+                            value
+                            )
+                        )
+                );
+
+            break;
+        }
+
+        case MONO_TYPE_I2:
+        {
+            numericValue =
+                std::to_string(
+                    *reinterpret_cast<int16_t*>(
+                        value
+                        )
+                );
+
+            break;
+        }
+
+        case MONO_TYPE_U2:
+        {
+            numericValue =
+                std::to_string(
+                    *reinterpret_cast<uint16_t*>(
+                        value
+                        )
+                );
+
+            break;
+        }
+
+        case MONO_TYPE_I4:
+        {
+            numericValue =
+                std::to_string(
+                    *reinterpret_cast<int32_t*>(
+                        value
+                        )
+                );
+
+            break;
+        }
+
+        case MONO_TYPE_U4:
+        {
+            numericValue =
+                std::to_string(
+                    *reinterpret_cast<uint32_t*>(
+                        value
+                        )
+                );
+
+            break;
+        }
+
+        case MONO_TYPE_I8:
+        {
+            numericValue =
+                std::to_string(
+                    *reinterpret_cast<int64_t*>(
+                        value
+                        )
+                );
+
+            break;
+        }
+
+        case MONO_TYPE_U8:
+        {
+            numericValue =
+                std::to_string(
+                    *reinterpret_cast<uint64_t*>(
+                        value
+                        )
+                );
+
+            break;
+        }
+
+        default:
+        {
+            return
+                "Returned: " +
+                enumName;
+        }
+        }
+
+        return
+            "Returned: " +
+            enumName +
+            " (" +
+            numericValue +
+            ")";
+    }
+
+    // String
+    if (type == MONO_TYPE_STRING)
+    {
+        std::string value =
+            MonoStringToUtf8(
+                result
+            );
+
+        return
+            "Returned: \"" +
+            value +
+            "\"";
+    }
+
+    // Managed class/object reference
+    if (type == MONO_TYPE_CLASS ||
+        type == MONO_TYPE_OBJECT)
+    {
+        char buffer[128];
+
+        sprintf_s(
+            buffer,
+            "Returned: %p",
+            result
+        );
+
+        return buffer;
+    }
+
+    void* value =
+        mono_object_unbox(
+            result
+        );
+
+    if (!value)
+    {
+        // Raw pointer return
+        if (type == MONO_TYPE_PTR)
+        {
+            char buffer[128];
+
+            sprintf_s(
+                buffer,
+                "Returned: %p",
+                result
+            );
+
+            return buffer;
+        }
+
+        return "Returned: null";
+    }
+
+    switch (type)
+    {
+    case MONO_TYPE_BOOLEAN:
+    {
+        bool ret =
+            *reinterpret_cast<bool*>(
+                value
+                );
+
+        return
+            std::string("Returned: ") +
+            (ret ? "true" : "false");
+    }
+
+    case MONO_TYPE_CHAR:
+    {
+        uint16_t ret =
+            *reinterpret_cast<uint16_t*>(
+                value
+                );
+
+        return
+            "Returned: " +
+            std::to_string(ret);
+    }
+
+    case MONO_TYPE_I1:
+    {
+        int8_t ret =
+            *reinterpret_cast<int8_t*>(
+                value
+                );
+
+        return
+            "Returned: " +
+            std::to_string(
+                static_cast<int>(ret)
+            );
+    }
+
+    case MONO_TYPE_U1:
+    {
+        uint8_t ret =
+            *reinterpret_cast<uint8_t*>(
+                value
+                );
+
+        return
+            "Returned: " +
+            std::to_string(
+                static_cast<unsigned int>(ret)
+            );
+    }
+
+    case MONO_TYPE_I2:
+    {
+        int16_t ret =
+            *reinterpret_cast<int16_t*>(
+                value
+                );
+
+        return
+            "Returned: " +
+            std::to_string(ret);
+    }
+
+    case MONO_TYPE_U2:
+    {
+        uint16_t ret =
+            *reinterpret_cast<uint16_t*>(
+                value
+                );
+
+        return
+            "Returned: " +
+            std::to_string(ret);
+    }
+
+    case MONO_TYPE_I4:
+    {
+        int32_t ret =
+            *reinterpret_cast<int32_t*>(
+                value
+                );
+
+        return
+            "Returned: " +
+            std::to_string(ret);
+    }
+
+    case MONO_TYPE_U4:
+    {
+        uint32_t ret =
+            *reinterpret_cast<uint32_t*>(
+                value
+                );
+
+        return
+            "Returned: " +
+            std::to_string(ret);
+    }
+
+    case MONO_TYPE_I8:
+    {
+        int64_t ret =
+            *reinterpret_cast<int64_t*>(
+                value
+                );
+
+        return
+            "Returned: " +
+            std::to_string(ret);
+    }
+
+    case MONO_TYPE_U8:
+    {
+        uint64_t ret =
+            *reinterpret_cast<uint64_t*>(
+                value
+                );
+
+        return
+            "Returned: " +
+            std::to_string(ret);
+    }
+
+    case MONO_TYPE_R4:
+    {
+        float ret =
+            *reinterpret_cast<float*>(
+                value
+                );
+
+        char buffer[128];
+
+        sprintf_s(
+            buffer,
+            "Returned: %.6f",
+            ret
+        );
+
+        return buffer;
+    }
+
+    case MONO_TYPE_R8:
+    {
+        double ret =
+            *reinterpret_cast<double*>(
+                value
+                );
+
+        char buffer[128];
+
+        sprintf_s(
+            buffer,
+            "Returned: %.6f",
+            ret
+        );
+
+        return buffer;
+    }
+
+    case MONO_TYPE_I:
+    {
+        intptr_t ret =
+            *reinterpret_cast<intptr_t*>(
+                value
+                );
+
+        char buffer[128];
+
+        sprintf_s(
+            buffer,
+            "Returned: 0x%llX",
+            static_cast<unsigned long long>(
+                ret
+                )
+        );
+
+        return buffer;
+    }
+
+    case MONO_TYPE_U:
+    {
+        uintptr_t ret =
+            *reinterpret_cast<uintptr_t*>(
+                value
+                );
+
+        char buffer[128];
+
+        sprintf_s(
+            buffer,
+            "Returned: 0x%llX",
+            static_cast<unsigned long long>(
+                ret
+                )
+        );
+
+        return buffer;
+    }
+
+    case MONO_TYPE_PTR:
+    {
+        uintptr_t ret =
+            *reinterpret_cast<uintptr_t*>(
+                value
+                );
+
+        char buffer[128];
+
+        sprintf_s(
+            buffer,
+            "Returned: 0x%llX",
+            static_cast<unsigned long long>(
+                ret
+                )
+        );
+
+        return buffer;
+    }
+
+    case MONO_TYPE_VALUETYPE:
+    {
+        if (typeName == "UnityEngine.Vector3")
+        {
+            Vector3 ret =
+                *reinterpret_cast<Vector3*>(
+                    value
+                    );
+
+            char buffer[256];
+
+            sprintf_s(
+                buffer,
+                "Returned: { x: %.3f, y: %.3f, z: %.3f }",
+                ret.x,
+                ret.y,
+                ret.z
+            );
+
+            return buffer;
+        }
+
+        if (typeName == "UnityEngine.Vector2")
+        {
+            Vector2 ret =
+                *reinterpret_cast<Vector2*>(
+                    value
+                    );
+
+            char buffer[256];
+
+            sprintf_s(
+                buffer,
+                "Returned: { x: %.3f, y: %.3f }",
+                ret.x,
+                ret.y
+            );
+
+            return buffer;
+        }
+
+        return
+            "Returned: Success (" +
+            typeName +
+            ")";
+    }
+    }
+
+    return
+        "Returned: Success (" +
+        typeName +
+        ")";
+}
+
 void Menu::DrawMethodInspector()
 {
     if (!Explorer::bMethodInspectorOpen ||
@@ -125,7 +884,24 @@ void Menu::DrawMethodInspector()
         ? mono_signature_get_param_count(signature)
         : 0;
 
-    std::vector<const char*> paramNames(paramCount);
+    uint32_t iflags = 0;
+
+    uint32_t methodFlags =
+        mono_method_get_flags(
+            method,
+            &iflags
+        );
+
+    constexpr uint32_t METHOD_ATTRIBUTE_STATIC =
+        0x0010;
+
+    bool isStatic =
+        (methodFlags &
+            METHOD_ATTRIBUTE_STATIC) != 0;
+
+    std::vector<const char*> paramNames(
+        paramCount
+    );
 
     if (paramCount > 0)
     {
@@ -140,7 +916,9 @@ void Menu::DrawMethodInspector()
 
     void* paramIter = nullptr;
 
-    for (uint32_t i = 0; i < paramCount; i++)
+    for (uint32_t i = 0;
+        i < paramCount;
+        i++)
     {
         MonoType* type =
             mono_signature_get_params(
@@ -150,7 +928,10 @@ void Menu::DrawMethodInspector()
 
         if (!type)
         {
-            paramTypes.push_back("unknown");
+            paramTypes.push_back(
+                "unknown"
+            );
+
             continue;
         }
 
@@ -163,10 +944,16 @@ void Menu::DrawMethodInspector()
             : "unknown";
 
         if (rawTypeName)
-            mono_free(rawTypeName);
+        {
+            mono_free(
+                rawTypeName
+            );
+        }
 
         Class* paramClass =
-            reinterpret_cast<Type*>(type)->GetClass();
+            reinterpret_cast<Type*>(
+                type
+                )->GetClass();
 
         if (paramClass)
         {
@@ -185,14 +972,23 @@ void Menu::DrawMethodInspector()
             }
         }
 
-        paramTypes.push_back(typeName);
+        paramTypes.push_back(
+            typeName
+        );
     }
 
-    std::string returnTypeName = "unknown";
+    MonoType* returnType =
+        nullptr;
+
+    std::string rawReturnTypeName =
+        "unknown";
+
+    std::string returnTypeName =
+        "unknown";
 
     if (signature)
     {
-        MonoType* returnType =
+        returnType =
             mono_signature_get_return_type(
                 signature
             );
@@ -206,6 +1002,9 @@ void Menu::DrawMethodInspector()
 
             if (rawReturnType)
             {
+                rawReturnTypeName =
+                    rawReturnType;
+
                 returnTypeName =
                     rawReturnType;
 
@@ -238,20 +1037,35 @@ void Menu::DrawMethodInspector()
 
     std::string methodSignature;
 
-    methodSignature += returnTypeName;
-    methodSignature += " ";
+    if (isStatic)
+    {
+        methodSignature +=
+            "static ";
+    }
+
+    methodSignature +=
+        returnTypeName;
+
+    methodSignature +=
+        " ";
 
     methodSignature +=
         methodName
         ? methodName
         : "<Unknown Method>";
 
-    methodSignature += "(";
+    methodSignature +=
+        "(";
 
-    for (uint32_t i = 0; i < paramCount; i++)
+    for (uint32_t i = 0;
+        i < paramCount;
+        i++)
     {
         if (i > 0)
-            methodSignature += ", ";
+        {
+            methodSignature +=
+                ", ";
+        }
 
         methodSignature +=
             paramTypes[i];
@@ -260,16 +1074,56 @@ void Menu::DrawMethodInspector()
             paramNames[i] &&
             *paramNames[i])
         {
-            methodSignature += " ";
+            methodSignature +=
+                " ";
+
             methodSignature +=
                 paramNames[i];
         }
     }
 
-    methodSignature += ")";
+    methodSignature +=
+        ")";
+
+    static Method* resultMethod =
+        nullptr;
+
+    static Object* resultObject =
+        nullptr;
+
+    static bool resultWasStatic =
+        false;
+
+    static bool hasCallResult =
+        false;
+
+    static std::string callResult;
+
+    if (resultMethod != method ||
+        resultObject !=
+        Explorer::pSelectedObject ||
+        resultWasStatic != isStatic)
+    {
+        resultMethod =
+            method;
+
+        resultObject =
+            Explorer::pSelectedObject;
+
+        resultWasStatic =
+            isStatic;
+
+        hasCallResult =
+            false;
+
+        callResult.clear();
+    }
 
     ImGui::SetNextWindowSize(
-        ImVec2(500.0f, 320.0f),
+        ImVec2(
+            500.0f,
+            340.0f
+        ),
         ImGuiCond_FirstUseEver
     );
 
@@ -283,10 +1137,14 @@ void Menu::DrawMethodInspector()
         return;
     }
 
-    const float padding = 18.0f;
+    const float padding =
+        18.0f;
 
     ImGui::Dummy(
-        ImVec2(0, 3)
+        ImVec2(
+            0,
+            3
+        )
     );
 
     ImGui::SetCursorPosX(
@@ -294,7 +1152,8 @@ void Menu::DrawMethodInspector()
     );
 
     ImGui::PushTextWrapPos(
-        ImGui::GetWindowWidth() - padding
+        ImGui::GetWindowWidth() -
+        padding
     );
 
     ImGui::TextWrapped(
@@ -305,7 +1164,10 @@ void Menu::DrawMethodInspector()
     ImGui::PopTextWrapPos();
 
     ImGui::Dummy(
-        ImVec2(0, 8)
+        ImVec2(
+            0,
+            8
+        )
     );
 
     ImGui::SetCursorPosX(
@@ -315,7 +1177,10 @@ void Menu::DrawMethodInspector()
     ImGui::Separator();
 
     ImGui::Dummy(
-        ImVec2(0, 10)
+        ImVec2(
+            0,
+            10
+        )
     );
 
     ImGui::SetCursorPosX(
@@ -325,14 +1190,18 @@ void Menu::DrawMethodInspector()
     ImGui::BeginChild(
         "##MethodInfo",
         ImVec2(
-            ImGui::GetContentRegionAvail().x - padding,
-            130.0f
+            ImGui::GetContentRegionAvail().x -
+            padding,
+            150.0f
         ),
         true
     );
 
     ImGui::Dummy(
-        ImVec2(0, 5)
+        ImVec2(
+            0,
+            5
+        )
     );
 
     ImGui::SetCursorPosX(12);
@@ -342,10 +1211,14 @@ void Menu::DrawMethodInspector()
     );
 
     ImGui::Dummy(
-        ImVec2(0, 7)
+        ImVec2(
+            0,
+            7
+        )
     );
 
     ImGui::SetCursorPosX(12);
+
     ImGui::TextDisabled(
         "Method"
     );
@@ -360,6 +1233,7 @@ void Menu::DrawMethodInspector()
     );
 
     ImGui::SetCursorPosX(12);
+
     ImGui::TextDisabled(
         "Class"
     );
@@ -374,6 +1248,22 @@ void Menu::DrawMethodInspector()
     );
 
     ImGui::SetCursorPosX(12);
+
+    ImGui::TextDisabled(
+        "Static"
+    );
+
+    ImGui::SameLine(120);
+
+    ImGui::Text(
+        "%s",
+        isStatic
+        ? "Yes"
+        : "No"
+    );
+
+    ImGui::SetCursorPosX(12);
+
     ImGui::TextDisabled(
         "Parameters"
     );
@@ -386,6 +1276,7 @@ void Menu::DrawMethodInspector()
     );
 
     ImGui::SetCursorPosX(12);
+
     ImGui::TextDisabled(
         "Return"
     );
@@ -398,6 +1289,7 @@ void Menu::DrawMethodInspector()
     );
 
     ImGui::SetCursorPosX(12);
+
     ImGui::TextDisabled(
         "MonoMethod"
     );
@@ -411,10 +1303,20 @@ void Menu::DrawMethodInspector()
 
     ImGui::EndChild();
 
-    if (paramCount == 0)
+    bool canCall =
+        paramCount == 0 &&
+        (
+            isStatic ||
+            Explorer::pSelectedObject
+            );
+
+    if (canCall)
     {
         ImGui::Dummy(
-            ImVec2(0, 8)
+            ImVec2(
+                0,
+                8
+            )
         );
 
         ImGui::SetCursorPosX(
@@ -429,7 +1331,127 @@ void Menu::DrawMethodInspector()
             )
         ))
         {
+            MonoObject* instance =
+                isStatic
+                ? nullptr
+                : reinterpret_cast<MonoObject*>(
+                    Explorer::pSelectedObject
+                    );
+
+            MonoObject* exception =
+                nullptr;
+
+            MonoObject* result =
+                mono_runtime_invoke(
+                    method,
+                    instance,
+                    nullptr,
+                    &exception
+                );
+
+            if (exception)
+            {
+                MonoObject* stringifyException =
+                    nullptr;
+
+                MonoString* exceptionString =
+                    mono_object_to_string(
+                        exception,
+                        &stringifyException
+                    );
+
+                if (exceptionString &&
+                    !stringifyException)
+                {
+                    callResult =
+                        "Call failed: " +
+                        MonoStringToUtf8(
+                            reinterpret_cast<MonoObject*>(
+                                exceptionString
+                                )
+                        );
+                }
+                else
+                {
+                    char buffer[128];
+
+                    sprintf_s(
+                        buffer,
+                        "Call failed - Exception: %p",
+                        exception
+                    );
+
+                    callResult =
+                        buffer;
+                }
+            }
+            else
+            {
+                callResult =
+                    FormatMethodReturn(
+                        result,
+                        returnType,
+                        rawReturnTypeName
+                    );
+            }
+
+            hasCallResult =
+                true;
+
+            if (!isStatic &&
+                Explorer::pSelectedObject)
+            {
+                UObject* selectedObject =
+                    reinterpret_cast<UObject*>(
+                        Explorer::pSelectedObject
+                        );
+
+                if (!selectedObject->IsValid())
+                {
+                    Explorer::pSelectedObject =
+                        nullptr;
+                }
+            }
         }
+    }
+
+    if (hasCallResult)
+    {
+        ImGui::Dummy(
+            ImVec2(
+                0,
+                10
+            )
+        );
+
+        ImGui::SetCursorPosX(
+            padding
+        );
+
+        ImGui::Separator();
+
+        ImGui::Dummy(
+            ImVec2(
+                0,
+                8
+            )
+        );
+
+        ImGui::SetCursorPosX(
+            padding
+        );
+
+        ImGui::PushTextWrapPos(
+            ImGui::GetWindowWidth() -
+            padding
+        );
+
+        ImGui::TextWrapped(
+            "%s",
+            callResult.c_str()
+        );
+
+        ImGui::PopTextWrapPos();
     }
 
     ImGui::End();
@@ -731,8 +1753,11 @@ void Menu::Draw()
                 Explorer::FindClassFromSearch(
                     Globals::searchBuffer
                 );
+
             if (!Globals::bNewType)
                 Globals::bNewType = true;
+
+            RefreshObjectSnapshot();
         }
 
         ImGui::EndChild();
@@ -872,6 +1897,160 @@ void Menu::Draw()
             ImGui::Dummy(ImVec2(0, 8));
 
             ImGui::Checkbox("Highlight Instances", &Globals::highlightObj);
+        }
+
+        ImGui::EndChild();
+    }
+    else if (Globals::currentTab == 3)
+    {
+        static int selectedObjectIndex = -1;
+
+        ImGui::SetCursorPosX(20);
+        ImGui::TextColored(
+            ImVec4(0.95f, 0.96f, 1.0f, 1.0f),
+            "Objects"
+        );
+
+        ImGui::SetCursorPosX(20);
+        ImGui::TextDisabled(
+            "Select an object from the current class snapshot."
+        );
+
+        ImGui::Dummy(
+            ImVec2(0, 10)
+        );
+
+        if (Explorer::pSelectedObject &&
+            selectedObjectIndex >= 0)
+        {
+            ImGui::SetCursorPosX(20);
+
+            ImGui::TextColored(
+                ImVec4(0.30f, 0.85f, 0.50f, 1.0f),
+                "Selected Object"
+            );
+
+            ImGui::SetCursorPosX(20);
+
+            ImGui::Text(
+                "Index: %d    Address: %p",
+                selectedObjectIndex,
+                Explorer::pSelectedObject
+            );
+
+            ImGui::Dummy(
+                ImVec2(0, 10)
+            );
+        }
+
+        ImGui::SetCursorPosX(20);
+
+        ImGui::BeginChild(
+            "##Objects",
+            ImVec2(
+                ImGui::GetContentRegionAvail().x - 20,
+                ImGui::GetContentRegionAvail().y - 20
+            ),
+            true
+        );
+
+        if (!Menu::objectsHandle)
+        {
+            ImGui::TextDisabled(
+                "No object snapshot available."
+            );
+        }
+        else
+        {
+            Array<Object*>* objects =
+                reinterpret_cast<Array<Object*>*>(
+                    mono_gchandle_get_target_v2(
+                        Menu::objectsHandle
+                    )
+                    );
+
+            if (!objects)
+            {
+                ImGui::TextDisabled(
+                    "Object snapshot is no longer available."
+                );
+            }
+            else
+            {
+                int count =
+                    objects->GetLength();
+
+                ImGui::Text(
+                    "Objects: %d",
+                    count
+                );
+
+                ImGui::Separator();
+
+                ImGui::Dummy(
+                    ImVec2(0, 5)
+                );
+
+                for (int i = 0; i < count; i++)
+                {
+                    Object* object =
+                        objects->GetValue(i);
+
+                    if (!object)
+                        continue;
+
+                    UObject* unityObject =
+                        reinterpret_cast<UObject*>(
+                            object
+                            );
+
+                    if (!unityObject->IsValid())
+                        continue;
+
+                    bool selected =
+                        Explorer::pSelectedObject ==
+                        object;
+
+                    char label[128];
+
+                    sprintf_s(
+                        label,
+                        "Index %d    [%p]",
+                        i,
+                        object
+                    );
+
+                    ImGui::PushID(i);
+
+                    ImGui::Selectable(
+                        label,
+                        selected
+                    );
+
+                    if (ImGui::BeginPopupContextItem(
+                        "##ObjectContext"
+                    ))
+                    {
+                        if (ImGui::Selectable(
+                            "Select Object",
+                            false,
+                            0,
+                            ImVec2(140.0f, 28.0f)
+                        ))
+                        {
+                            Explorer::pSelectedObject =
+                                object;
+
+                            selectedObjectIndex =
+                                i;
+                        }
+
+                        ImGui::EndPopup();
+                    }
+
+                    ImGui::PopID();
+                }
+            }
         }
 
         ImGui::EndChild();

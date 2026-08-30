@@ -265,3 +265,33 @@ typedef MonoType* (*t_mono_signature_get_return_type)(
 
 inline t_mono_signature_get_return_type
 mono_signature_get_return_type;
+
+typedef int (*t_mono_type_get_type)(
+	MonoType* type
+	);
+
+inline t_mono_type_get_type mono_type_get_type;
+
+typedef int (*t_mono_class_is_enum)(
+	MonoClass* klass
+	);
+inline t_mono_class_is_enum mono_class_is_enum;
+
+typedef MonoType* (*t_mono_class_enum_basetype)(
+	MonoClass* klass
+	);
+inline t_mono_class_enum_basetype mono_class_enum_basetype;
+
+typedef MonoString* (*t_mono_object_to_string)(
+	MonoObject* obj,
+	MonoObject** exc
+	);
+inline t_mono_object_to_string mono_object_to_string;
+
+typedef uint32_t(*t_mono_method_get_flags)(
+	MonoMethod* method,
+	uint32_t* iflags
+	);
+
+inline t_mono_method_get_flags
+mono_method_get_flags;

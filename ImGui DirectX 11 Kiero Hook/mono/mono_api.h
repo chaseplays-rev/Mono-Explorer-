@@ -50,6 +50,13 @@ namespace API {
 				_MonoMemory.GetExport(L"mono_assembly_foreach")
 				);
 
+		mono_type_get_type =
+			reinterpret_cast<t_mono_type_get_type>(
+				_MonoMemory.GetExport(
+					L"mono_type_get_type"
+				)
+				);
+
 		mono_image_get_table_info =
 			reinterpret_cast<t_mono_image_get_table_info>(
 				_MonoMemory.GetExport(L"mono_image_get_table_info")
@@ -58,6 +65,34 @@ namespace API {
 		mono_table_info_get_rows =
 			reinterpret_cast<t_mono_table_info_get_rows>(
 				_MonoMemory.GetExport(L"mono_table_info_get_rows")
+				);
+
+		mono_class_is_enum =
+			reinterpret_cast<t_mono_class_is_enum>(
+				_MonoMemory.GetExport(
+					L"mono_class_is_enum"
+				)
+				);
+
+		mono_method_get_flags =
+			reinterpret_cast<t_mono_method_get_flags>(
+				_MonoMemory.GetExport(
+					L"mono_method_get_flags"
+				)
+				);
+
+		mono_class_enum_basetype =
+			reinterpret_cast<t_mono_class_enum_basetype>(
+				_MonoMemory.GetExport(
+					L"mono_class_enum_basetype"
+				)
+				);
+
+		mono_object_to_string =
+			reinterpret_cast<t_mono_object_to_string>(
+				_MonoMemory.GetExport(
+					L"mono_object_to_string"
+				)
 				);
 
 		mono_class_get =

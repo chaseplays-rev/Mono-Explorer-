@@ -6,6 +6,7 @@ namespace Explorer
     Method* pSelectedMethod;
     Field* pSelectedField;
     Type* pSelectedType;
+    Object* pSelectedObject;
 
     Method* pInspectedMethod;
     bool bMethodInspectorOpen;
