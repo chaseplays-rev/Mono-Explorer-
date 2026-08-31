@@ -1,6 +1,10 @@
 #include "helper.h"
 void Helper::ClearObjectSnapshot() {
     Explorer::pSelectedObject = nullptr;
+    Explorer::pSelectedMethod = nullptr;
+    Explorer::pSelectedField = nullptr;
+    Explorer::pInspectedMethod = nullptr;
+    Explorer::bMethodInspectorOpen = false;
     if (!Cache::objectsHandle)
         return;
     mono_gchandle_free_v2(Cache::objectsHandle);
@@ -336,7 +340,19 @@ std::string Helper::FormatMethodReturn(MonoObject* result, MonoType* returnType,
 }
 
 #include "menu.h"
+
+static bool HasValidSelectedObject() {
+    if (!Explorer::pSelectedObject)
+        return false;
+    UObject* object = reinterpret_cast<UObject*>(Explorer::pSelectedObject);
+    return object->IsValid();
+}
 void Helper::DrawMethodInspector() {
+    if (!HasValidSelectedObject()) {
+        Explorer::bMethodInspectorOpen = false;
+        Explorer::pInspectedMethod = nullptr;
+        return;
+    }
     if (!Explorer::bMethodInspectorOpen || !Explorer::pInspectedMethod)
         return;
     Method* method = Explorer::pInspectedMethod;
@@ -460,10 +476,6 @@ void Helper::DrawMethodInspector() {
     ImGui::SameLine(120);
     ImGui::Text("%s", className ? className : "");
     ImGui::SetCursorPosX(12);
-    ImGui::TextDisabled("Static");
-    ImGui::SameLine(120);
-    ImGui::Text("%s", isStatic ? "Yes" : "No");
-    ImGui::SetCursorPosX(12);
     ImGui::TextDisabled("Parameters");
     ImGui::SameLine(120);
     ImGui::Text("%u", paramCount);
@@ -520,6 +532,16 @@ void Helper::DrawMethodInspector() {
 }
 
 void Helper::DrawSidebar(const ImVec2& windowSize) {
+    bool validObject = HasValidSelectedObject();
+    if (!validObject && Explorer::pSelectedObject) {
+        Explorer::pSelectedObject = nullptr;
+        Explorer::pSelectedMethod = nullptr;
+        Explorer::pSelectedField = nullptr;
+        Explorer::pInspectedMethod = nullptr;
+        Explorer::bMethodInspectorOpen = false;
+    }
+    if (!validObject && Globals::currentTab == 0)
+        Globals::currentTab = 1;
     ImGui::BeginChild("##Sidebar", ImVec2(175.0f, windowSize.y), true);
     ImGui::Dummy(ImVec2(0, 10));
     ImGui::SetCursorPosX(18);
@@ -532,16 +554,15 @@ void Helper::DrawSidebar(const ImVec2& windowSize) {
     ImGui::SetCursorPosX(14);
     if (Helper::SidebarButton("Search", Globals::currentTab == 1))
         Globals::currentTab = 1;
-    ImGui::SetCursorPosX(14);
-    if (Helper::SidebarButton("Inspect", Globals::currentTab == 0))
-        Globals::currentTab = 0;
+    if (validObject) {
+        ImGui::SetCursorPosX(14);
+        if (Helper::SidebarButton("Inspect", Globals::currentTab == 0))
+            Globals::currentTab = 0;
+    }
     if (Globals::validClassFound && Explorer::pSelectedClass) {
         ImGui::SetCursorPosX(14);
         if (Helper::SidebarButton("Utilities", Globals::currentTab == 2))
             Globals::currentTab = 2;
-        ImGui::SetCursorPosX(14);
-        if (Helper::SidebarButton("Objects", Globals::currentTab == 3))
-            Globals::currentTab = 3;
     }
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 75);
     ImGui::Separator();
@@ -554,205 +575,211 @@ void Helper::DrawSidebar(const ImVec2& windowSize) {
 }
 
 void Helper::DrawInspectTab() {
-        ImGui::SetCursorPosX(20);
-        ImGui::TextColored(ImVec4(0.95f, 0.96f, 1.0f, 1.0f), "Inspector");
-        ImGui::SetCursorPosX(20);
-        ImGui::TextDisabled("Inspect runtime class members.");
-        ImGui::Dummy(ImVec2(0, 14));
-        ImGui::SetCursorPosX(20);
-        ImGui::BeginChild("##InspectorDetails", ImVec2(ImGui::GetContentRegionAvail().x - 20, ImGui::GetContentRegionAvail().y - 20), true);
-        if (!Explorer::pSelectedClass) {
-            ImGui::TextDisabled("Search for a class first.");
-        } else {
-            Class* klass = Explorer::pSelectedClass;
-            const char* className = mono_class_get_name(klass);
-            const char* classNamespace = mono_class_get_namespace(klass);
-            MonoImage* image = mono_class_get_image(klass);
-            const char* assemblyName = image ? mono_image_get_name(image) : "";
-            ImGui::Text("Class Information");
-            ImGui::Separator();
-            ImGui::Dummy(ImVec2(0, 5));
-            ImGui::TextDisabled("Class");
-            ImGui::SameLine(140);
-            ImGui::Text("%s", className ? className : "");
-            ImGui::TextDisabled("Namespace");
-            ImGui::SameLine(140);
-            ImGui::Text("%s", classNamespace && *classNamespace ? classNamespace : "<Global>");
-            ImGui::TextDisabled("Assembly");
-            ImGui::SameLine(140);
-            ImGui::Text("%s", assemblyName ? assemblyName : "");
-            ImGui::TextDisabled("Address");
-            ImGui::SameLine(140);
-            ImGui::Text("%p", klass);
-            ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Separator();
-            ImGui::Dummy(ImVec2(0, 5));
-            if (ImGui::CollapsingHeader("Methods", ImGuiTreeNodeFlags_DefaultOpen)) {
-                void* iter = nullptr;
-                MonoMethod* method = nullptr;
-                while ((method = mono_class_get_methods(klass, &iter)) != nullptr) {
-                    const char* name = mono_method_get_name(method);
-                    if (!name)
-                        continue;
-                    Method* currentMethod = reinterpret_cast<Method*>(method);
-                    bool selected = Explorer::pSelectedMethod == currentMethod;
-                    ImGui::PushID(method);
-                    if (ImGui::Selectable(name, selected)) {
-                        Explorer::pSelectedMethod = currentMethod;
-                        Explorer::pSelectedField = nullptr;
-                    }
-                    if (ImGui::BeginPopupContextItem("##MethodContext")) {
-                        if (ImGui::Selectable("Inspect Method", false, 0, ImVec2(140.0f, 28.0f))) {
-                            Explorer::pSelectedMethod = currentMethod;
-                            Explorer::pSelectedField = nullptr;
-                            Explorer::pInspectedMethod = currentMethod;
-                            Explorer::bMethodInspectorOpen = true;
-                        }
-                        ImGui::EndPopup();
-                    }
-                    ImGui::PopID();
-                }
+    if (!HasValidSelectedObject()) {
+        Globals::currentTab = 1;
+        return;
+    }
+    Object* selectedObject = Explorer::pSelectedObject;
+    Class* klass = selectedObject->GetClass();
+    if (!klass) {
+        Explorer::pSelectedObject = nullptr;
+        Globals::currentTab = 1;
+        return;
+    }
+    ImGui::SetCursorPosX(20);
+    ImGui::TextColored(ImVec4(0.95f, 0.96f, 1.0f, 1.0f), "Inspector");
+    ImGui::SetCursorPosX(20);
+    ImGui::TextDisabled("Inspect the selected object instance.");
+    ImGui::Dummy(ImVec2(0, 14));
+    ImGui::SetCursorPosX(20);
+    ImGui::BeginChild("##InspectorDetails", ImVec2(ImGui::GetContentRegionAvail().x - 20, ImGui::GetContentRegionAvail().y - 20), true);
+    const char* className = mono_class_get_name(klass);
+    const char* classNamespace = mono_class_get_namespace(klass);
+    MonoImage* image = mono_class_get_image(klass);
+    const char* assemblyName = image ? mono_image_get_name(image) : "";
+    ImGui::Text("Object Information");
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0, 5));
+    ImGui::TextDisabled("Object");
+    ImGui::SameLine(140);
+    ImGui::Text("%p", selectedObject);
+    ImGui::TextDisabled("Class");
+    ImGui::SameLine(140);
+    ImGui::Text("%s", className ? className : "");
+    ImGui::TextDisabled("Namespace");
+    ImGui::SameLine(140);
+    ImGui::Text("%s", classNamespace && *classNamespace ? classNamespace : "<Global>");
+    ImGui::TextDisabled("Assembly");
+    ImGui::SameLine(140);
+    ImGui::Text("%s", assemblyName ? assemblyName : "");
+    ImGui::TextDisabled("Class Address");
+    ImGui::SameLine(140);
+    ImGui::Text("%p", klass);
+    ImGui::Dummy(ImVec2(0, 8));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0, 5));
+    if (ImGui::CollapsingHeader("Methods", ImGuiTreeNodeFlags_DefaultOpen)) {
+        void* iter = nullptr;
+        MonoMethod* method = nullptr;
+        while ((method = mono_class_get_methods(klass, &iter)) != nullptr) {
+            const char* name = mono_method_get_name(method);
+            if (!name)
+                continue;
+            Method* currentMethod = reinterpret_cast<Method*>(method);
+            bool selected = Explorer::pSelectedMethod == currentMethod;
+            ImGui::PushID(method);
+            if (ImGui::Selectable(name, selected)) {
+                Explorer::pSelectedMethod = currentMethod;
+                Explorer::pSelectedField = nullptr;
             }
-            if (ImGui::CollapsingHeader("Fields")) {
-                void* iter = nullptr;
-                MonoField* field = nullptr;
-                while ((field = mono_class_get_fields(klass, &iter)) != nullptr) {
-                    const char* name = mono_field_get_name(field);
-                    MonoType* type = mono_field_get_type(field);
-                    char* typeName = type ? mono_type_get_name(type) : nullptr;
-                    std::string label;
-                    if (name)
-                        label += name;
-                    label += " : ";
-                    if (typeName)
-                        label += typeName;
-                    else
-                        label += "unknown";
-                    Field* currentField = reinterpret_cast<Field*>(field);
-                    bool selected = Explorer::pSelectedField == currentField;
-                    if (ImGui::Selectable(label.c_str(), selected)) {
-                        Explorer::pSelectedField = currentField;
-                        Explorer::pSelectedMethod = nullptr;
-                    }
-                    if (typeName)
-                        mono_free(typeName);
+            if (ImGui::BeginPopupContextItem("##MethodContext")) {
+                if (ImGui::Selectable("Inspect Method", false, 0, ImVec2(140.0f, 28.0f))) {
+                    Explorer::pSelectedMethod = currentMethod;
+                    Explorer::pSelectedField = nullptr;
+                    Explorer::pInspectedMethod = currentMethod;
+                    Explorer::bMethodInspectorOpen = true;
                 }
+                ImGui::EndPopup();
             }
-            if (ImGui::CollapsingHeader("Properties")) {
-                void* iter = nullptr;
-                MonoProperty* property = nullptr;
-                while ((property = mono_class_get_properties(klass, &iter)) != nullptr) {
-                    const char* name = mono_property_get_name(property);
-                    if (!name)
-                        continue;
-                    ImGui::Selectable(name);
-                }
-            }
+            ImGui::PopID();
         }
-        ImGui::EndChild();
+    }
+    if (ImGui::CollapsingHeader("Fields")) {
+        void* iter = nullptr;
+        MonoField* field = nullptr;
+        while ((field = mono_class_get_fields(klass, &iter)) != nullptr) {
+            const char* name = mono_field_get_name(field);
+            MonoType* type = mono_field_get_type(field);
+            char* typeName = type ? mono_type_get_name(type) : nullptr;
+            std::string label;
+            if (name)
+                label += name;
+            label += " : ";
+            if (typeName)
+                label += typeName;
+            else
+                label += "unknown";
+            Field* currentField = reinterpret_cast<Field*>(field);
+            bool selected = Explorer::pSelectedField == currentField;
+            if (ImGui::Selectable(label.c_str(), selected)) {
+                Explorer::pSelectedField = currentField;
+                Explorer::pSelectedMethod = nullptr;
+            }
+            if (typeName)
+                mono_free(typeName);
+        }
+    }
+    if (ImGui::CollapsingHeader("Properties")) {
+        void* iter = nullptr;
+        MonoProperty* property = nullptr;
+        while ((property = mono_class_get_properties(klass, &iter)) != nullptr) {
+            const char* name = mono_property_get_name(property);
+            if (!name)
+                continue;
+            ImGui::Selectable(name);
+        }
+    }
+    ImGui::EndChild();
 }
 
 void Helper::DrawSearchTab() {
-        ImGui::SetCursorPosX(20);
-        ImGui::TextColored(ImVec4(0.95f, 0.96f, 1.0f, 1.0f), "Search");
-        ImGui::SetCursorPosX(20);
-        ImGui::TextDisabled("Search for a Mono runtime class.");
-        ImGui::Dummy(ImVec2(0, 14));
-        ImGui::SetCursorPosX(20);
-        ImGui::BeginChild("##SearchBox", ImVec2(ImGui::GetContentRegionAvail().x - 20, 90), true);
-        ImGui::Text("Search Runtime");
-        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 90);
-        bool enterPressed = ImGui::InputTextWithHint("##RuntimeSearch", "Assembly.Namespace.Class", Globals::searchBuffer, IM_ARRAYSIZE(Globals::searchBuffer), ImGuiInputTextFlags_EnterReturnsTrue);
-        ImGui::SameLine();
-        bool searchPressed = ImGui::Button("Search", ImVec2(75, 0));
-        if (enterPressed || searchPressed) {
-            Globals::validClassFound = Explorer::FindClassFromSearch(Globals::searchBuffer);
-            if (!Globals::bNewType)
-                Globals::bNewType = true;
-            Helper::RefreshObjectSnapshot();
-        }
-        ImGui::EndChild();
-        ImGui::Dummy(ImVec2(0, 12));
-        ImGui::SetCursorPosX(20);
-        ImGui::BeginChild("##SearchResults", ImVec2(ImGui::GetContentRegionAvail().x - 20, ImGui::GetContentRegionAvail().y - 20), true);
-        if (Globals::validClassFound && Explorer::pSelectedClass) {
-            Class* klass = Explorer::pSelectedClass;
-            const char* className = mono_class_get_name(klass);
-            const char* classNamespace = mono_class_get_namespace(klass);
-            MonoImage* image = mono_class_get_image(klass);
-            const char* assemblyName = image ? mono_image_get_name(image) : "";
-            ImGui::TextColored(ImVec4(0.30f, 0.85f, 0.50f, 1.0f), "Found");
-            ImGui::Separator();
-            ImGui::Dummy(ImVec2(0, 5));
-            ImGui::TextDisabled("Class");
-            ImGui::SameLine(130);
-            ImGui::Text("%s", className ? className : "");
-            ImGui::TextDisabled("Namespace");
-            ImGui::SameLine(130);
-            ImGui::Text("%s", classNamespace && *classNamespace ? classNamespace : "<Global>");
-            ImGui::TextDisabled("Assembly");
-            ImGui::SameLine(130);
-            ImGui::Text("%s", assemblyName ? assemblyName : "");
-            ImGui::TextDisabled("Address");
-            ImGui::SameLine(130);
-            ImGui::Text("%p", klass);
-            ImGui::Dummy(ImVec2(0, 10));
-            if (ImGui::Button("Inspect Class", ImVec2(100, 0))) {
-                Explorer::pSelectedMethod = nullptr;
-                Explorer::pSelectedField = nullptr;
-                Globals::currentTab = 0;
-            }
-        } else {
-            ImGui::TextDisabled("No class found.");
-        }
-        ImGui::EndChild();
+    ImGui::SetCursorPosX(20);
+    ImGui::TextColored(ImVec4(0.95f, 0.96f, 1.0f, 1.0f), "Search");
+    ImGui::SetCursorPosX(20);
+    ImGui::TextDisabled("Search for a Mono runtime class.");
+    ImGui::Dummy(ImVec2(0, 14));
+    ImGui::SetCursorPosX(20);
+    ImGui::BeginChild("##SearchBox", ImVec2(ImGui::GetContentRegionAvail().x - 20, 90), true);
+    ImGui::Text("Search Runtime");
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 90);
+    bool enterPressed = ImGui::InputTextWithHint("##RuntimeSearch", "Assembly.Namespace.Class", Globals::searchBuffer, IM_ARRAYSIZE(Globals::searchBuffer), ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine();
+    bool searchPressed = ImGui::Button("Search", ImVec2(75, 0));
+    if (enterPressed || searchPressed) {
+        Helper::ClearObjectSnapshot();
+        Globals::validClassFound = Explorer::FindClassFromSearch(Globals::searchBuffer);
+        if (!Globals::bNewType)
+            Globals::bNewType = true;
+    }
+    ImGui::EndChild();
+    ImGui::Dummy(ImVec2(0, 12));
+    ImGui::SetCursorPosX(20);
+    ImGui::BeginChild("##SearchResults", ImVec2(ImGui::GetContentRegionAvail().x - 20, ImGui::GetContentRegionAvail().y - 20), true);
+    if (Globals::validClassFound && Explorer::pSelectedClass) {
+        Class* klass = Explorer::pSelectedClass;
+        const char* className = mono_class_get_name(klass);
+        const char* classNamespace = mono_class_get_namespace(klass);
+        MonoImage* image = mono_class_get_image(klass);
+        const char* assemblyName = image ? mono_image_get_name(image) : "";
+        ImGui::TextColored(ImVec4(0.30f, 0.85f, 0.50f, 1.0f), "Found");
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0, 5));
+        ImGui::TextDisabled("Class");
+        ImGui::SameLine(130);
+        ImGui::Text("%s", className ? className : "");
+        ImGui::TextDisabled("Namespace");
+        ImGui::SameLine(130);
+        ImGui::Text("%s", classNamespace && *classNamespace ? classNamespace : "<Global>");
+        ImGui::TextDisabled("Assembly");
+        ImGui::SameLine(130);
+        ImGui::Text("%s", assemblyName ? assemblyName : "");
+        ImGui::TextDisabled("Address");
+        ImGui::SameLine(130);
+        ImGui::Text("%p", klass);
+    } else {
+        ImGui::TextDisabled("No class found.");
+    }
+    ImGui::EndChild();
 }
 
 void Helper::DrawUtilitiesTab() {
-        ImGui::SetCursorPosX(20);
-        ImGui::TextColored(ImVec4(0.95f, 0.96f, 1.0f, 1.0f), "Utilities");
-        ImGui::SetCursorPosX(20);
-        ImGui::TextDisabled("Utilities for the currently selected class.");
-        ImGui::Dummy(ImVec2(0, 14));
-        ImGui::SetCursorPosX(20);
-        ImGui::BeginChild("##Utilities", ImVec2(ImGui::GetContentRegionAvail().x - 20, ImGui::GetContentRegionAvail().y - 20), true);
-        if (Explorer::pSelectedClass) {
-            const char* className = mono_class_get_name(Explorer::pSelectedClass);
-            ImGui::Text("Selected Class");
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.35f, 0.65f, 1.0f, 1.0f), "%s", className ? className : "");
-            ImGui::Separator();
-            ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("Highlight Instances", &Globals::highlightObj);
+    static int selectedObjectIndex = -1;
+    if (!Explorer::pSelectedObject)
+        selectedObjectIndex = -1;
+    ImGui::SetCursorPosX(20);
+    ImGui::TextColored(ImVec4(0.95f, 0.96f, 1.0f, 1.0f), "Utilities");
+    ImGui::SetCursorPosX(20);
+    ImGui::TextDisabled("Utilities for the currently selected class.");
+    ImGui::Dummy(ImVec2(0, 14));
+    ImGui::SetCursorPosX(20);
+    ImGui::BeginChild("##Utilities", ImVec2(ImGui::GetContentRegionAvail().x - 20, ImGui::GetContentRegionAvail().y - 20), true);
+    if (Explorer::pSelectedClass) {
+        const char* className = mono_class_get_name(Explorer::pSelectedClass);
+        ImGui::Text("Selected Class");
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.35f, 0.65f, 1.0f, 1.0f), "%s", className ? className : "");
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0, 8));
+        ImGui::Checkbox("Highlight Instances", &Globals::highlightObj);
+        ImGui::Dummy(ImVec2(0, 6));
+        if (ImGui::Button("Search Valid Objects", ImVec2(170.0f, 32.0f))) {
+            selectedObjectIndex = -1;
+            Helper::RefreshObjectSnapshot();
         }
-        ImGui::EndChild();
-}
-
-void Helper::DrawObjectsTab() {
-        static int selectedObjectIndex = -1;
-        ImGui::SetCursorPosX(20);
-        ImGui::TextColored(ImVec4(0.95f, 0.96f, 1.0f, 1.0f), "Objects");
-        ImGui::SetCursorPosX(20);
-        ImGui::TextDisabled("Select an object from the current class snapshot.");
-        ImGui::Dummy(ImVec2(0, 10));
         if (Explorer::pSelectedObject && selectedObjectIndex >= 0) {
-            ImGui::SetCursorPosX(20);
-            ImGui::TextColored(ImVec4(0.30f, 0.85f, 0.50f, 1.0f), "Selected Object");
-            ImGui::SetCursorPosX(20);
-            ImGui::Text("Index: %d    Address: %p", selectedObjectIndex, Explorer::pSelectedObject);
             ImGui::Dummy(ImVec2(0, 10));
+            ImGui::TextColored(ImVec4(0.30f, 0.85f, 0.50f, 1.0f), "Selected Object");
+            ImGui::Text("Index: %d    Address: %p", selectedObjectIndex, Explorer::pSelectedObject);
         }
-        ImGui::SetCursorPosX(20);
-        ImGui::BeginChild("##Objects", ImVec2(ImGui::GetContentRegionAvail().x - 20, ImGui::GetContentRegionAvail().y - 20), true);
-        if (!Cache::objectsHandle) {
-            ImGui::TextDisabled("No object snapshot available.");
-        } else {
+        if (Cache::objectsHandle) {
+            ImGui::Dummy(ImVec2(0, 10));
+            ImGui::BeginChild("##ValidObjects", ImVec2(0, ImGui::GetContentRegionAvail().y), true);
             Array<Object*>* objects = reinterpret_cast<Array<Object*>*>(mono_gchandle_get_target_v2(Cache::objectsHandle));
             if (!objects) {
                 ImGui::TextDisabled("Object snapshot is no longer available.");
             } else {
                 int count = objects->GetLength();
-                ImGui::Text("Objects: %d", count);
+                int validCount = 0;
+                for (int i = 0; i < count; i++) {
+                    Object* object = objects->GetValue(i);
+                    if (!object)
+                        continue;
+                    UObject* unityObject = reinterpret_cast<UObject*>(object);
+                    if (!unityObject->IsValid())
+                        continue;
+                    validCount++;
+                }
+                ImGui::Text("Valid Objects: %d", validCount);
                 ImGui::Separator();
                 ImGui::Dummy(ImVec2(0, 5));
                 for (int i = 0; i < count; i++) {
@@ -770,6 +797,10 @@ void Helper::DrawObjectsTab() {
                     if (ImGui::BeginPopupContextItem("##ObjectContext")) {
                         if (ImGui::Selectable("Select Object", false, 0, ImVec2(140.0f, 28.0f))) {
                             Explorer::pSelectedObject = object;
+                            Explorer::pSelectedMethod = nullptr;
+                            Explorer::pSelectedField = nullptr;
+                            Explorer::pInspectedMethod = nullptr;
+                            Explorer::bMethodInspectorOpen = false;
                             selectedObjectIndex = i;
                         }
                         ImGui::EndPopup();
@@ -777,11 +808,15 @@ void Helper::DrawObjectsTab() {
                     ImGui::PopID();
                 }
             }
+            ImGui::EndChild();
         }
-        ImGui::EndChild();
+    }
+    ImGui::EndChild();
 }
 
 void Helper::DrawCurrentTab() {
+    if (Globals::currentTab == 0 && !HasValidSelectedObject())
+        Globals::currentTab = 1;
     switch (Globals::currentTab) {
     case 0:
         DrawInspectTab();
@@ -792,10 +827,9 @@ void Helper::DrawCurrentTab() {
     case 2:
         DrawUtilitiesTab();
         break;
-    case 3:
-        DrawObjectsTab();
-        break;
     default:
+        Globals::currentTab = 1;
+        DrawSearchTab();
         break;
     }
 }

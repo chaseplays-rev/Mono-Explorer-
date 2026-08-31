@@ -14,6 +14,5 @@ namespace Helper {
 	void DrawInspectTab();
 	void DrawSearchTab();
 	void DrawUtilitiesTab();
-	void DrawObjectsTab();
 	void DrawCurrentTab();
 }
