@@ -10,7 +10,7 @@ namespace Drawing
             return;
         }
 
-        if (!Menu::objectsHandle)
+        if (!Cache::objectsHandle)
             return;
 
         Camera* pCam =
@@ -22,7 +22,7 @@ namespace Drawing
         Array<Object*>* pObjects =
             reinterpret_cast<Array<Object*>*>(
                 mono_gchandle_get_target_v2(
-                    Menu::objectsHandle
+                    Cache::objectsHandle
                 )
                 );
 

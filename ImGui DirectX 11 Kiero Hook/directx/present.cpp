@@ -17,7 +17,7 @@ void InitImGui()
 	ImGui_ImplWin32_Init(pWindow);
 	ImGui_ImplDX11_Init(pDevice, pContext);
 
-	SetupModernStyle();
+	Helper::SetupModernStyle();
 }
 
 LRESULT __stdcall WndProc(const HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {

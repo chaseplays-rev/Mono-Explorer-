@@ -1,6 +1,5 @@
 #pragma once
-#include "../includes.h"
-#include "../sdk/sdk.hpp"
+#include "../directx/cache.h"
 
 namespace Explorer {
     extern Class* pSelectedClass;
