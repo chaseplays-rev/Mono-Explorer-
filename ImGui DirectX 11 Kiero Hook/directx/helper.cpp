@@ -1,5 +1,209 @@
 #include "helper.h"
+#include "method_call.h"
+#include "inspect_tabs.h"
+
+static MonoGCHandle gMethodResultHandle = nullptr;
+
+static void ClearMethodResultHandle() {
+    if (!gMethodResultHandle) return;
+    mono_gchandle_free_v2(gMethodResultHandle);
+    gMethodResultHandle = nullptr;
+}
+
+static MonoObject* GetMethodResultObject() {
+    return gMethodResultHandle ? mono_gchandle_get_target_v2(gMethodResultHandle) : nullptr;
+}
+
+static void CopyPointerToClipboard(const void* pointer) {
+    char buffer[32];
+    sprintf_s(buffer, "%p", pointer);
+    ImGui::SetClipboardText(buffer);
+}
+
+static bool IsManagedReferenceReturn(MonoType* type) {
+    if (!type) return false;
+    int code = mono_type_get_type(type);
+    if (code == MONO_TYPE_VOID || code == MONO_TYPE_STRING || code == MONO_TYPE_PTR) return false;
+    Class* klass = reinterpret_cast<Type*>(type)->GetClass();
+    return klass && !mono_class_is_valuetype(klass);
+}
+
+
+namespace {
+    constexpr int MONO_TYPE_GENERICINST_LOCAL = 0x15;
+    constexpr int MONO_TYPE_ARRAY_LOCAL = 0x14;
+    constexpr int MONO_TYPE_SZARRAY_LOCAL = 0x1D;
+    constexpr uint32_t FIELD_ATTRIBUTE_STATIC_LOCAL = 0x0010;
+
+    using t_mono_field_get_flags_local = uint32_t(*)(MonoField* field);
+    using t_mono_field_get_value_local = void(*)(MonoObject* object, MonoField* field, void* value);
+    using t_mono_class_value_size_local = int(*)(MonoClass* klass, uint32_t* align);
+    using t_mono_value_box_local = MonoObject*(*)(MonoDomain* domain, MonoClass* klass, void* value);
+
+    t_mono_field_get_flags_local gReturnFieldGetFlags = nullptr;
+    t_mono_field_get_value_local gReturnFieldGetValue = nullptr;
+    t_mono_class_value_size_local gReturnClassValueSize = nullptr;
+    t_mono_value_box_local gReturnValueBox = nullptr;
+    bool gReturnReflectionResolved = false;
+
+    struct ScopedReturnRoot {
+        MonoGCHandle handle = nullptr;
+        MonoObject* fallback = nullptr;
+        explicit ScopedReturnRoot(MonoObject* object) : fallback(object) { if (object) handle = mono_gchandle_new_v2(object, 0); }
+        ~ScopedReturnRoot() { if (handle) mono_gchandle_free_v2(handle); }
+        MonoObject* Get() const { return handle ? mono_gchandle_get_target_v2(handle) : fallback; }
+    };
+
+    bool ResolveReturnReflectionApi() {
+        if (gReturnReflectionResolved) return gReturnFieldGetFlags && gReturnFieldGetValue && gReturnClassValueSize && gReturnValueBox;
+        gReturnReflectionResolved = true;
+        if (!mono_class_get_name) return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        const void* address = reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(mono_class_get_name));
+        if (!VirtualQuery(address, &mbi, sizeof(mbi)) || !mbi.AllocationBase) return false;
+        HMODULE module = reinterpret_cast<HMODULE>(mbi.AllocationBase);
+        gReturnFieldGetFlags = reinterpret_cast<t_mono_field_get_flags_local>(GetProcAddress(module, "mono_field_get_flags"));
+        gReturnFieldGetValue = reinterpret_cast<t_mono_field_get_value_local>(GetProcAddress(module, "mono_field_get_value"));
+        gReturnClassValueSize = reinterpret_cast<t_mono_class_value_size_local>(GetProcAddress(module, "mono_class_value_size"));
+        gReturnValueBox = reinterpret_cast<t_mono_value_box_local>(GetProcAddress(module, "mono_value_box"));
+        return gReturnFieldGetFlags && gReturnFieldGetValue && gReturnClassValueSize && gReturnValueBox;
+    }
+
+    std::string ReturnTypeName(MonoType* type) {
+        if (!type) return "unknown";
+        char* raw = mono_type_get_name(type);
+        if (!raw) return "unknown";
+        std::string name = raw;
+        mono_free(raw);
+        return name;
+    }
+
+    std::string ReturnClassName(Class* klass) {
+        if (!klass) return "Object";
+        const char* name = mono_class_get_name(klass);
+        return name && *name ? name : "Object";
+    }
+
+    std::string FormatRawReturnValue(MonoType* type, const void* data) {
+        if (!type || !data) return "?";
+        char buffer[256];
+        switch (mono_type_get_type(type)) {
+        case MONO_TYPE_BOOLEAN: return *reinterpret_cast<const bool*>(data) ? "true" : "false";
+        case MONO_TYPE_CHAR: return std::to_string(*reinterpret_cast<const uint16_t*>(data));
+        case MONO_TYPE_I1: return std::to_string(static_cast<int>(*reinterpret_cast<const int8_t*>(data)));
+        case MONO_TYPE_U1: return std::to_string(static_cast<unsigned int>(*reinterpret_cast<const uint8_t*>(data)));
+        case MONO_TYPE_I2: return std::to_string(*reinterpret_cast<const int16_t*>(data));
+        case MONO_TYPE_U2: return std::to_string(*reinterpret_cast<const uint16_t*>(data));
+        case MONO_TYPE_I4: return std::to_string(*reinterpret_cast<const int32_t*>(data));
+        case MONO_TYPE_U4: return std::to_string(*reinterpret_cast<const uint32_t*>(data));
+        case MONO_TYPE_I8: return std::to_string(*reinterpret_cast<const int64_t*>(data));
+        case MONO_TYPE_U8: return std::to_string(*reinterpret_cast<const uint64_t*>(data));
+        case MONO_TYPE_R4: sprintf_s(buffer, "%.6f", *reinterpret_cast<const float*>(data)); return buffer;
+        case MONO_TYPE_R8: sprintf_s(buffer, "%.6f", *reinterpret_cast<const double*>(data)); return buffer;
+        case MONO_TYPE_I: sprintf_s(buffer, "0x%llX", static_cast<unsigned long long>(*reinterpret_cast<const intptr_t*>(data))); return buffer;
+        case MONO_TYPE_U: sprintf_s(buffer, "0x%llX", static_cast<unsigned long long>(*reinterpret_cast<const uintptr_t*>(data))); return buffer;
+        case MONO_TYPE_PTR: sprintf_s(buffer, "%p", *reinterpret_cast<void* const*>(data)); return buffer;
+        default: return "?";
+        }
+    }
+
+    std::string FormatBoxedValueType(MonoObject* boxed, Class* klass, int depth);
+
+    std::string FormatBoxedEnumValue(MonoObject* boxed, Class* klass) {
+        if (!boxed || !klass) return "null";
+        std::string name = "Unknown";
+        MonoObject* exception = nullptr;
+        MonoString* enumString = mono_object_to_string(boxed, &exception);
+        if (enumString && !exception) name = Helper::MonoStringToUtf8(reinterpret_cast<MonoObject*>(enumString));
+        MonoType* baseType = mono_class_enum_basetype(klass);
+        void* raw = mono_object_unbox(boxed);
+        if (!baseType || !raw) return name;
+        return name + " (" + FormatRawReturnValue(baseType, raw) + ")";
+    }
+
+    std::string FormatReferenceReturnValue(MonoObject* object) {
+        if (!object) return "null";
+        Class* runtimeClass = reinterpret_cast<Object*>(object)->GetClass();
+        char buffer[256];
+        sprintf_s(buffer, "%s* %p", ReturnClassName(runtimeClass).c_str(), object);
+        return buffer;
+    }
+
+    std::string FormatFieldReturnValue(MonoObject* owner, MonoField* field, MonoType* fieldType, int depth) {
+        if (!owner || !field || !fieldType || !ResolveReturnReflectionApi()) return "?";
+        int code = mono_type_get_type(fieldType);
+        if (code == MONO_TYPE_STRING) {
+            MonoObject* object = nullptr;
+            gReturnFieldGetValue(owner, field, &object);
+            return object ? "\"" + Helper::MonoStringToUtf8(object) + "\"" : "null";
+        }
+        Class* fieldClass = reinterpret_cast<Type*>(fieldType)->GetClass();
+        bool valueType = fieldClass && mono_class_is_valuetype(fieldClass);
+        if (fieldClass && !valueType) {
+            MonoObject* object = nullptr;
+            gReturnFieldGetValue(owner, field, &object);
+            return FormatReferenceReturnValue(object);
+        }
+        if (code == MONO_TYPE_ARRAY_LOCAL || code == MONO_TYPE_SZARRAY_LOCAL || (code == MONO_TYPE_GENERICINST_LOCAL && fieldClass && !valueType)) {
+            MonoObject* object = nullptr;
+            gReturnFieldGetValue(owner, field, &object);
+            return FormatReferenceReturnValue(object);
+        }
+        if (fieldClass && valueType && (code == MONO_TYPE_VALUETYPE || code == MONO_TYPE_GENERICINST_LOCAL)) {
+            uint32_t align = 0;
+            int size = gReturnClassValueSize(fieldClass, &align);
+            if (size <= 0 || size > 1024 * 1024) return ReturnTypeName(fieldType) + "(?)";
+            std::vector<unsigned char> storage(static_cast<size_t>(size));
+            gReturnFieldGetValue(owner, field, storage.data());
+            MonoObject* boxed = gReturnValueBox(Mono::domain, fieldClass, storage.data());
+            if (!boxed) return ReturnTypeName(fieldType) + "(?)";
+            MonoGCHandle handle = mono_gchandle_new_v2(boxed, 0);
+            if (handle) boxed = mono_gchandle_get_target_v2(handle);
+            std::string result = mono_class_is_enum(fieldClass) ? FormatBoxedEnumValue(boxed, fieldClass) : FormatBoxedValueType(boxed, fieldClass, depth + 1);
+            if (handle) mono_gchandle_free_v2(handle);
+            return result;
+        }
+        alignas(16) unsigned char storage[32]{};
+        gReturnFieldGetValue(owner, field, storage);
+        return FormatRawReturnValue(fieldType, storage);
+    }
+
+    std::string FormatBoxedValueType(MonoObject* boxed, Class* klass, int depth) {
+        if (!boxed || !klass) return "null";
+        if (mono_class_is_enum(klass)) return FormatBoxedEnumValue(boxed, klass);
+        if (depth > 6) return ReturnClassName(klass) + " { ... }";
+        if (!ResolveReturnReflectionApi()) {
+            MonoObject* exception = nullptr;
+            MonoString* text = mono_object_to_string(boxed, &exception);
+            if (text && !exception) return ReturnClassName(klass) + "(" + Helper::MonoStringToUtf8(reinterpret_cast<MonoObject*>(text)) + ")";
+            return ReturnClassName(klass) + " { ? }";
+        }
+        std::string output = ReturnClassName(klass) + " { ";
+        bool first = true;
+        void* iter = nullptr;
+        MonoField* field = nullptr;
+        while ((field = mono_class_get_fields(klass, &iter)) != nullptr) {
+            if ((gReturnFieldGetFlags(field) & FIELD_ATTRIBUTE_STATIC_LOCAL) != 0) continue;
+            MonoType* fieldType = mono_field_get_type(field);
+            const char* fieldName = mono_field_get_name(field);
+            if (!first) output += ", ";
+            first = false;
+            output += fieldName && *fieldName ? fieldName : "field";
+            output += ": ";
+            output += FormatFieldReturnValue(boxed, field, fieldType, depth);
+        }
+        output += " }";
+        if (first) {
+            MonoObject* exception = nullptr;
+            MonoString* text = mono_object_to_string(boxed, &exception);
+            if (text && !exception) return ReturnClassName(klass) + "(" + Helper::MonoStringToUtf8(reinterpret_cast<MonoObject*>(text)) + ")";
+        }
+        return output;
+    }
+}
 void Helper::ClearObjectSnapshot() {
+    ClearMethodResultHandle();
+    InspectTabs::Reset();
     Explorer::pSelectedObject = nullptr;
     Explorer::pSelectedMethod = nullptr;
     Explorer::pSelectedField = nullptr;
@@ -142,8 +346,9 @@ std::string Helper::MonoStringToUtf8(MonoObject* object) {
     int size = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
     if (size <= 0)
         return "";
-    std::string result(size - 1, '\0');
+    std::string result(size, '\0');
     WideCharToMultiByte(CP_UTF8, 0, wide, -1, result.data(), size, nullptr, nullptr);
+    if (!result.empty() && result.back() == '\0') result.pop_back();
     return result;
 }
 
@@ -155,6 +360,9 @@ std::string Helper::FormatMethodReturn(MonoObject* result, MonoType* returnType,
         return "Returned: void";
     if (!result)
         return "Returned: null";
+    ScopedReturnRoot returnRoot(result);
+    result = returnRoot.Get();
+    if (!result) return "Returned: null";
     Class* returnClass = reinterpret_cast<Type*>(returnType)->GetClass(); if (returnClass && mono_class_is_enum(returnClass)) {
         std::string enumName = "Unknown";
         MonoObject* exception = nullptr;
@@ -219,11 +427,14 @@ std::string Helper::FormatMethodReturn(MonoObject* result, MonoType* returnType,
     } if (type == MONO_TYPE_STRING) {
         std::string value = MonoStringToUtf8(result);
         return "Returned: \"" + value + "\"";
-    } if (type == MONO_TYPE_CLASS || type == MONO_TYPE_OBJECT) {
-        char buffer[128];
-        sprintf_s(buffer, "Returned: %p", result);
+    } if (returnClass && !mono_class_is_valuetype(returnClass)) {
+        Class* runtimeClass = reinterpret_cast<Object*>(result)->GetClass();
+        const char* runtimeClassName = runtimeClass ? mono_class_get_name(runtimeClass) : nullptr;
+        char buffer[256];
+        sprintf_s(buffer, "Returned: %s* %p", runtimeClassName ? runtimeClassName : "Object", result);
         return buffer;
     }
+    if (returnClass && mono_class_is_valuetype(returnClass) && (type == MONO_TYPE_VALUETYPE || type == MONO_TYPE_GENERICINST_LOCAL)) return "Returned: " + FormatBoxedValueType(result, returnClass, 0);
     void* value = mono_object_unbox(result);
     if (!value) { // Raw pointer return
         if (type == MONO_TYPE_PTR) {
@@ -348,13 +559,8 @@ static bool HasValidSelectedObject() {
     return object->IsValid();
 }
 void Helper::DrawMethodInspector() {
-    if (!HasValidSelectedObject()) {
-        Explorer::bMethodInspectorOpen = false;
-        Explorer::pInspectedMethod = nullptr;
-        return;
-    }
-    if (!Explorer::bMethodInspectorOpen || !Explorer::pInspectedMethod)
-        return;
+    if (!HasValidSelectedObject()) { ClearMethodResultHandle(); InspectTabs::ClearMethodContext(); Explorer::bMethodInspectorOpen = false; Explorer::pInspectedMethod = nullptr; return; }
+    if (!Explorer::bMethodInspectorOpen || !Explorer::pInspectedMethod) { ClearMethodResultHandle(); InspectTabs::ClearMethodContext(); return; }
     Method* method = Explorer::pInspectedMethod;
     const char* methodName = mono_method_get_name(method);
     MonoClass* ownerClass = mono_method_get_class(method);
@@ -365,33 +571,20 @@ void Helper::DrawMethodInspector() {
     uint32_t methodFlags = mono_method_get_flags(method, &iflags);
     constexpr uint32_t METHOD_ATTRIBUTE_STATIC = 0x0010;
     bool isStatic = (methodFlags & METHOD_ATTRIBUTE_STATIC) != 0;
+    Object* methodObject = InspectTabs::GetMethodContext(method);
     std::vector<const char*> paramNames(paramCount);
-    if (paramCount > 0) {
-        mono_method_get_param_names(method, paramNames.data());
-    }
+    if (paramCount > 0) mono_method_get_param_names(method, paramNames.data());
     std::vector<std::string> paramTypes;
     paramTypes.reserve(paramCount);
     void* paramIter = nullptr;
     for (uint32_t i = 0; i < paramCount; i++) {
         MonoType* type = mono_signature_get_params(signature, &paramIter);
-        if (!type) {
-            paramTypes.push_back("unknown");
-            continue;
-        }
+        if (!type) { paramTypes.push_back("unknown"); continue; }
         char* rawTypeName = mono_type_get_name(type);
         std::string typeName = rawTypeName ? rawTypeName : "unknown";
-        if (rawTypeName) {
-            mono_free(rawTypeName);
-        }
+        if (rawTypeName) mono_free(rawTypeName);
         Class* paramClass = reinterpret_cast<Type*>(type)->GetClass();
-        if (paramClass) {
-            bool isValueType = mono_class_is_valuetype(paramClass) != 0;
-            if (!isValueType) {
-                if (typeName.empty() || typeName.back() != '*') {
-                    typeName += "*";
-                }
-            }
-        }
+        if (paramClass && !mono_class_is_valuetype(paramClass) && (typeName.empty() || typeName.back() != '*')) typeName += "*";
         paramTypes.push_back(typeName);
     }
     MonoType* returnType = nullptr;
@@ -401,37 +594,18 @@ void Helper::DrawMethodInspector() {
         returnType = mono_signature_get_return_type(signature);
         if (returnType) {
             char* rawReturnType = mono_type_get_name(returnType);
-            if (rawReturnType) {
-                rawReturnTypeName = rawReturnType;
-                returnTypeName = rawReturnType;
-                mono_free(rawReturnType);
-            }
+            if (rawReturnType) { rawReturnTypeName = rawReturnType; returnTypeName = rawReturnType; mono_free(rawReturnType); }
             Class* returnClass = reinterpret_cast<Type*>(returnType)->GetClass();
-            if (returnClass) {
-                bool isValueType = mono_class_is_valuetype(returnClass) != 0;
-                if (!isValueType && !returnTypeName.empty() && returnTypeName.back() != '*') {
-                    returnTypeName += "*";
-                }
-            }
+            if (returnClass && !mono_class_is_valuetype(returnClass) && !returnTypeName.empty() && returnTypeName.back() != '*') returnTypeName += "*";
         }
     }
     std::string methodSignature;
-    if (isStatic) {
-        methodSignature += "static ";
-    }
-    methodSignature += returnTypeName;
-    methodSignature += " ";
-    methodSignature += methodName ? methodName : "<Unknown Method>";
-    methodSignature += "(";
+    if (isStatic) methodSignature += "static ";
+    methodSignature += returnTypeName + " " + (methodName ? methodName : "<Unknown Method>") + "(";
     for (uint32_t i = 0; i < paramCount; i++) {
-        if (i > 0) {
-            methodSignature += ", ";
-        }
+        if (i > 0) methodSignature += ", ";
         methodSignature += paramTypes[i];
-        if (i < paramNames.size() && paramNames[i] && *paramNames[i]) {
-            methodSignature += " ";
-            methodSignature += paramNames[i];
-        }
+        if (i < paramNames.size() && paramNames[i] && *paramNames[i]) methodSignature += " " + std::string(paramNames[i]);
     }
     methodSignature += ")";
     static Method* resultMethod = nullptr;
@@ -439,18 +613,16 @@ void Helper::DrawMethodInspector() {
     static bool resultWasStatic = false;
     static bool hasCallResult = false;
     static std::string callResult;
-    if (resultMethod != method || resultObject != Explorer::pSelectedObject || resultWasStatic != isStatic) {
-        resultMethod = method;
-        resultObject = Explorer::pSelectedObject;
-        resultWasStatic = isStatic;
-        hasCallResult = false;
-        callResult.clear();
+    static Method* argumentMethod = nullptr;
+    static char argumentBuffer[4096] = {};
+    if (argumentMethod != method) {
+        argumentMethod = method;
+        std::string argumentTemplate = paramCount > 0 ? MethodCall::BuildTemplate(method) : "";
+        strncpy_s(argumentBuffer, sizeof(argumentBuffer), argumentTemplate.c_str(), _TRUNCATE);
     }
-    ImGui::SetNextWindowSize(ImVec2(500.0f, 340.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Method Inspector", &Explorer::bMethodInspectorOpen, ImGuiWindowFlags_NoCollapse)) {
-        ImGui::End();
-        return;
-    }
+    if (resultMethod != method || resultObject != methodObject || resultWasStatic != isStatic) { ClearMethodResultHandle(); resultMethod = method; resultObject = methodObject; resultWasStatic = isStatic; hasCallResult = false; callResult.clear(); }
+    ImGui::SetNextWindowSize(ImVec2(560.0f, paramCount > 0 ? 430.0f : 340.0f), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Method Inspector", &Explorer::bMethodInspectorOpen, ImGuiWindowFlags_NoCollapse)) { ImGui::End(); return; }
     const float padding = 18.0f;
     ImGui::Dummy(ImVec2(0, 3));
     ImGui::SetCursorPosX(padding);
@@ -462,7 +634,7 @@ void Helper::DrawMethodInspector() {
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0, 10));
     ImGui::SetCursorPosX(padding);
-    ImGui::BeginChild("##MethodInfo", ImVec2(ImGui::GetContentRegionAvail().x - padding, 150.0f), true);
+    ImGui::BeginChild("##MethodInfo", ImVec2(ImGui::GetContentRegionAvail().x - padding, 165.0f), true);
     ImGui::Dummy(ImVec2(0, 5));
     ImGui::SetCursorPosX(12);
     ImGui::Text("Method Information");
@@ -476,6 +648,10 @@ void Helper::DrawMethodInspector() {
     ImGui::SameLine(120);
     ImGui::Text("%s", className ? className : "");
     ImGui::SetCursorPosX(12);
+    ImGui::TextDisabled("Instance");
+    ImGui::SameLine(120);
+    if (isStatic) ImGui::TextDisabled("N/A"); else ImGui::Text("%p", methodObject);
+    ImGui::SetCursorPosX(12);
     ImGui::TextDisabled("Parameters");
     ImGui::SameLine(120);
     ImGui::Text("%u", paramCount);
@@ -488,34 +664,46 @@ void Helper::DrawMethodInspector() {
     ImGui::SameLine(120);
     ImGui::Text("%p", method);
     ImGui::EndChild();
-    bool canCall = paramCount == 0 && (isStatic || Explorer::pSelectedObject);
+    MethodCall::ValidationResult validation{ true, "" };
+    if (paramCount > 0) {
+        ImGui::Dummy(ImVec2(0, 8));
+        ImGui::SetCursorPosX(padding);
+        ImGui::TextDisabled("Arguments");
+        ImGui::SetCursorPosX(padding);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - padding);
+        ImGui::InputText("##MethodArguments", argumentBuffer, IM_ARRAYSIZE(argumentBuffer));
+        validation = MethodCall::Validate(method, argumentBuffer);
+        ImGui::SetCursorPosX(padding);
+        if (!validation.valid) ImGui::TextColored(ImVec4(0.95f, 0.30f, 0.30f, 1.0f), "X %s", validation.error.c_str());
+        else ImGui::TextColored(ImVec4(0.30f, 0.85f, 0.50f, 1.0f), "Valid arguments");
+    }
+    bool canCall = (paramCount == 0 || validation.valid) && (isStatic || methodObject);
     if (canCall) {
         ImGui::Dummy(ImVec2(0, 8));
         ImGui::SetCursorPosX(padding);
         if (ImGui::Button("Call", ImVec2(160.0f, 36.0f))) {
-            MonoObject* instance = isStatic ? nullptr : reinterpret_cast<MonoObject*>(Explorer::pSelectedObject);
+            ClearMethodResultHandle();
+            MonoObject* instance = isStatic ? nullptr : reinterpret_cast<MonoObject*>(methodObject);
             MonoObject* exception = nullptr;
-            MonoObject* result = mono_runtime_invoke(method, instance, nullptr, &exception);
-            if (exception) {
+            MonoObject* result = nullptr;
+            std::string invokeError;
+            bool invoked = false;
+            if (paramCount == 0) { result = mono_runtime_invoke(method, instance, nullptr, &exception); invoked = true; }
+            else invoked = MethodCall::Invoke(method, instance, argumentBuffer, result, exception, invokeError);
+            if (!invoked) callResult = "Call failed: " + invokeError;
+            else if (exception) {
                 MonoObject* stringifyException = nullptr;
                 MonoString* exceptionString = mono_object_to_string(exception, &stringifyException);
-                if (exceptionString && !stringifyException) {
-                    callResult = "Call failed: " + Helper::MonoStringToUtf8(reinterpret_cast<MonoObject*>(exceptionString));
-                } else {
-                    char buffer[128];
-                    sprintf_s(buffer, "Call failed - Exception: %p", exception);
-                    callResult = buffer;
-                }
+                if (exceptionString && !stringifyException) callResult = "Call failed: " + Helper::MonoStringToUtf8(reinterpret_cast<MonoObject*>(exceptionString));
+                else { char buffer[128]; sprintf_s(buffer, "Call failed - Exception: %p", exception); callResult = buffer; }
             } else {
+                if (result && IsManagedReferenceReturn(returnType)) {
+                    gMethodResultHandle = mono_gchandle_new_v2(result, 0);
+                    if (gMethodResultHandle) result = mono_gchandle_get_target_v2(gMethodResultHandle);
+                }
                 callResult = Helper::FormatMethodReturn(result, returnType, rawReturnTypeName);
             }
             hasCallResult = true;
-            if (!isStatic && Explorer::pSelectedObject) {
-                UObject* selectedObject = reinterpret_cast<UObject*>(Explorer::pSelectedObject);
-                if (!selectedObject->IsValid()) {
-                    Explorer::pSelectedObject = nullptr;
-                }
-            }
         }
     }
     if (hasCallResult) {
@@ -524,13 +712,21 @@ void Helper::DrawMethodInspector() {
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0, 8));
         ImGui::SetCursorPosX(padding);
+        ImGui::TextDisabled("Return");
+        ImGui::SameLine(90);
         ImGui::PushTextWrapPos(ImGui::GetWindowWidth() - padding);
         ImGui::TextWrapped("%s", callResult.c_str());
         ImGui::PopTextWrapPos();
+        MonoObject* returnedObject = GetMethodResultObject();
+        if (returnedObject) {
+            ImGui::SetCursorPosX(padding);
+            if (ImGui::Button("Copy##ReturnedObject", ImVec2(70.0f, 28.0f))) CopyPointerToClipboard(returnedObject);
+            ImGui::SameLine();
+            if (ImGui::Button("Inspect##ReturnedObject", ImVec2(70.0f, 28.0f))) { InspectTabs::OpenObject(reinterpret_cast<Object*>(returnedObject)); Globals::currentTab = 0; }
+        }
     }
     ImGui::End();
 }
-
 void Helper::DrawSidebar(const ImVec2& windowSize) {
     bool validObject = HasValidSelectedObject();
     if (!validObject && Explorer::pSelectedObject) {
@@ -539,6 +735,7 @@ void Helper::DrawSidebar(const ImVec2& windowSize) {
         Explorer::pSelectedField = nullptr;
         Explorer::pInspectedMethod = nullptr;
         Explorer::bMethodInspectorOpen = false;
+        InspectTabs::Reset();
     }
     if (!validObject && Globals::currentTab == 0)
         Globals::currentTab = 1;
@@ -575,34 +772,36 @@ void Helper::DrawSidebar(const ImVec2& windowSize) {
 }
 
 void Helper::DrawInspectTab() {
-    if (!HasValidSelectedObject()) {
-        Globals::currentTab = 1;
-        return;
-    }
-    Object* selectedObject = Explorer::pSelectedObject;
-    Class* klass = selectedObject->GetClass();
-    if (!klass) {
-        Explorer::pSelectedObject = nullptr;
-        Globals::currentTab = 1;
-        return;
-    }
+    if (!HasValidSelectedObject()) { InspectTabs::Reset(); Globals::currentTab = 1; return; }
+    InspectTabs::SyncRoot(Explorer::pSelectedObject);
     ImGui::SetCursorPosX(20);
     ImGui::TextColored(ImVec4(0.95f, 0.96f, 1.0f, 1.0f), "Inspector");
     ImGui::SetCursorPosX(20);
-    ImGui::TextDisabled("Inspect the selected object instance.");
-    ImGui::Dummy(ImVec2(0, 14));
+    ImGui::TextDisabled("Each tab keeps its own object instance for method calls.");
+    ImGui::Dummy(ImVec2(0, 8));
+    ImGui::SetCursorPosX(20);
+    InspectTabs::DrawTabBar();
+    Class* klass = InspectTabs::GetActiveClass();
+    Object* tabObject = InspectTabs::GetActiveObject();
+    if (!klass || !tabObject) { Globals::currentTab = 2; return; }
+    ImGui::Dummy(ImVec2(0, 6));
     ImGui::SetCursorPosX(20);
     ImGui::BeginChild("##InspectorDetails", ImVec2(ImGui::GetContentRegionAvail().x - 20, ImGui::GetContentRegionAvail().y - 20), true);
     const char* className = mono_class_get_name(klass);
     const char* classNamespace = mono_class_get_namespace(klass);
     MonoImage* image = mono_class_get_image(klass);
     const char* assemblyName = image ? mono_image_get_name(image) : "";
-    ImGui::Text("Object Information");
+    ImGui::Text("Object / Class Information");
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0, 5));
     ImGui::TextDisabled("Object");
     ImGui::SameLine(140);
-    ImGui::Text("%p", selectedObject);
+    ImGui::Text("%p", tabObject);
+    ImGui::SameLine();
+    if (ImGui::Button("Copy##InspectObject", ImVec2(60.0f, 0.0f))) CopyPointerToClipboard(tabObject);
+    ImGui::TextDisabled("Root Object");
+    ImGui::SameLine(140);
+    ImGui::Text("%p", Explorer::pSelectedObject);
     ImGui::TextDisabled("Class");
     ImGui::SameLine(140);
     ImGui::Text("%s", className ? className : "");
@@ -618,26 +817,24 @@ void Helper::DrawInspectTab() {
     ImGui::Dummy(ImVec2(0, 8));
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0, 5));
+    InspectTabs::DrawBaseTypesAndInterfaces(klass);
     if (ImGui::CollapsingHeader("Methods", ImGuiTreeNodeFlags_DefaultOpen)) {
         void* iter = nullptr;
         MonoMethod* method = nullptr;
         while ((method = mono_class_get_methods(klass, &iter)) != nullptr) {
             const char* name = mono_method_get_name(method);
-            if (!name)
-                continue;
+            if (!name) continue;
             Method* currentMethod = reinterpret_cast<Method*>(method);
             bool selected = Explorer::pSelectedMethod == currentMethod;
             ImGui::PushID(method);
-            if (ImGui::Selectable(name, selected)) {
-                Explorer::pSelectedMethod = currentMethod;
-                Explorer::pSelectedField = nullptr;
-            }
+            if (ImGui::Selectable(name, selected)) { Explorer::pSelectedMethod = currentMethod; Explorer::pSelectedField = nullptr; }
             if (ImGui::BeginPopupContextItem("##MethodContext")) {
                 if (ImGui::Selectable("Inspect Method", false, 0, ImVec2(140.0f, 28.0f))) {
                     Explorer::pSelectedMethod = currentMethod;
                     Explorer::pSelectedField = nullptr;
                     Explorer::pInspectedMethod = currentMethod;
                     Explorer::bMethodInspectorOpen = true;
+                    InspectTabs::SetMethodContext(currentMethod, tabObject);
                 }
                 ImGui::EndPopup();
             }
@@ -652,21 +849,13 @@ void Helper::DrawInspectTab() {
             MonoType* type = mono_field_get_type(field);
             char* typeName = type ? mono_type_get_name(type) : nullptr;
             std::string label;
-            if (name)
-                label += name;
+            if (name) label += name;
             label += " : ";
-            if (typeName)
-                label += typeName;
-            else
-                label += "unknown";
+            label += typeName ? typeName : "unknown";
             Field* currentField = reinterpret_cast<Field*>(field);
             bool selected = Explorer::pSelectedField == currentField;
-            if (ImGui::Selectable(label.c_str(), selected)) {
-                Explorer::pSelectedField = currentField;
-                Explorer::pSelectedMethod = nullptr;
-            }
-            if (typeName)
-                mono_free(typeName);
+            if (ImGui::Selectable(label.c_str(), selected)) { Explorer::pSelectedField = currentField; Explorer::pSelectedMethod = nullptr; }
+            if (typeName) mono_free(typeName);
         }
     }
     if (ImGui::CollapsingHeader("Properties")) {
@@ -674,8 +863,7 @@ void Helper::DrawInspectTab() {
         MonoProperty* property = nullptr;
         while ((property = mono_class_get_properties(klass, &iter)) != nullptr) {
             const char* name = mono_property_get_name(property);
-            if (!name)
-                continue;
+            if (!name) continue;
             ImGui::Selectable(name);
         }
     }
@@ -760,6 +948,8 @@ void Helper::DrawUtilitiesTab() {
             ImGui::Dummy(ImVec2(0, 10));
             ImGui::TextColored(ImVec4(0.30f, 0.85f, 0.50f, 1.0f), "Selected Object");
             ImGui::Text("Index: %d    Address: %p", selectedObjectIndex, Explorer::pSelectedObject);
+            ImGui::SameLine();
+            if (ImGui::Button("Copy##SelectedObject", ImVec2(60.0f, 0.0f))) CopyPointerToClipboard(Explorer::pSelectedObject);
         }
         if (Cache::objectsHandle) {
             ImGui::Dummy(ImVec2(0, 10));
@@ -801,6 +991,8 @@ void Helper::DrawUtilitiesTab() {
                             Explorer::pSelectedField = nullptr;
                             Explorer::pInspectedMethod = nullptr;
                             Explorer::bMethodInspectorOpen = false;
+                            InspectTabs::Reset();
+                            InspectTabs::SyncRoot(object);
                             selectedObjectIndex = i;
                         }
                         ImGui::EndPopup();

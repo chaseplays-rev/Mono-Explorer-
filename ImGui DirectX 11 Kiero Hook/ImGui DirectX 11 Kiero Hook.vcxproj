@@ -147,7 +147,9 @@
     <ClCompile Include="directx\cache.cpp" />
     <ClCompile Include="directx\drawing.cpp" />
     <ClCompile Include="directx\helper.cpp" />
+    <ClCompile Include="directx\inspect_tabs.cpp" />
     <ClCompile Include="directx\menu.cpp" />
+    <ClCompile Include="directx\method_call.cpp" />
     <ClCompile Include="directx\present.cpp" />
     <ClCompile Include="explorer\explorer.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
@@ -175,7 +177,9 @@
     <ClInclude Include="directx\cache.h" />
     <ClInclude Include="directx\drawing.h" />
     <ClInclude Include="directx\helper.h" />
+    <ClInclude Include="directx\inspect_tabs.h" />
     <ClInclude Include="directx\menu.h" />
+    <ClInclude Include="directx\method_call.h" />
     <ClInclude Include="directx\present.h" />
     <ClInclude Include="explorer\explorer.h" />
     <ClInclude Include="imgui\imconfig.h" />
