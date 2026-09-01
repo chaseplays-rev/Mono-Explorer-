@@ -1,6 +1,7 @@
 #include "helper.h"
 #include "method_call.h"
 #include "inspect_tabs.h"
+#include "hook_manager.h"
 
 static MonoGCHandle gMethodResultHandle = nullptr;
 
@@ -559,6 +560,7 @@ static bool HasValidSelectedObject() {
     return object->IsValid();
 }
 void Helper::DrawMethodInspector() {
+    HookManager::DrawWindows();
     if (!HasValidSelectedObject()) { ClearMethodResultHandle(); InspectTabs::ClearMethodContext(); Explorer::bMethodInspectorOpen = false; Explorer::pInspectedMethod = nullptr; return; }
     if (!Explorer::bMethodInspectorOpen || !Explorer::pInspectedMethod) { ClearMethodResultHandle(); InspectTabs::ClearMethodContext(); return; }
     Method* method = Explorer::pInspectedMethod;
@@ -835,6 +837,11 @@ void Helper::DrawInspectTab() {
                     Explorer::pInspectedMethod = currentMethod;
                     Explorer::bMethodInspectorOpen = true;
                     InspectTabs::SetMethodContext(currentMethod, tabObject);
+                }
+                if (HookManager::IsHooked(currentMethod)) {
+                    if (ImGui::Selectable("Open Hook", false, 0, ImVec2(140.0f, 28.0f))) HookManager::Open(currentMethod);
+                } else {
+                    if (ImGui::Selectable("Hook", false, 0, ImVec2(140.0f, 28.0f))) HookManager::Hook(currentMethod);
                 }
                 ImGui::EndPopup();
             }
