@@ -2,6 +2,82 @@
 #include "method_call.h"
 #include "inspect_tabs.h"
 #include "hook_manager.h"
+#include "class_dumper.h"
+
+
+namespace {
+    using t_class_parent_ro = MonoClass* (*)(MonoClass* klass);
+    using t_class_interfaces_ro = MonoClass* (*)(MonoClass* klass, void** iter);
+    t_class_parent_ro gClassParentRO = nullptr;
+    t_class_interfaces_ro gClassInterfacesRO = nullptr;
+    bool gClassMetaResolvedRO = false;
+
+    bool ResolveClassMetaRO() {
+        if (gClassMetaResolvedRO) return gClassParentRO && gClassInterfacesRO;
+        gClassMetaResolvedRO = true;
+        if (!mono_class_get_name) return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        const void* address = reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(mono_class_get_name));
+        if (!VirtualQuery(address, &mbi, sizeof(mbi)) || !mbi.AllocationBase) return false;
+        HMODULE module = reinterpret_cast<HMODULE>(mbi.AllocationBase);
+        gClassParentRO = reinterpret_cast<t_class_parent_ro>(GetProcAddress(module, "mono_class_get_parent"));
+        gClassInterfacesRO = reinterpret_cast<t_class_interfaces_ro>(GetProcAddress(module, "mono_class_get_interfaces"));
+        return gClassParentRO && gClassInterfacesRO;
+    }
+
+    bool ContainsClassRO(const std::vector<Class*>& classes, Class* klass) {
+        for (Class* current : classes) if (current == klass) return true;
+        return false;
+    }
+
+    void CollectInterfacesRO(Class* klass, std::vector<Class*>& interfaces, int depth = 0) {
+        if (!klass || depth > 32 || !ResolveClassMetaRO()) return;
+        void* iter = nullptr;
+        MonoClass* raw = nullptr;
+        while ((raw = gClassInterfacesRO(klass, &iter)) != nullptr) {
+            Class* current = reinterpret_cast<Class*>(raw);
+            if (!ContainsClassRO(interfaces, current)) { interfaces.push_back(current); CollectInterfacesRO(current, interfaces, depth + 1); }
+        }
+    }
+
+    std::string ClassDisplayNameRO(Class* klass) {
+        if (!klass) return "<null>";
+        const char* name = mono_class_get_name(klass);
+        const char* namespc = mono_class_get_namespace(klass);
+        if (namespc && *namespc) return std::string(namespc) + "." + (name ? name : "<unknown>");
+        return name ? name : "<unknown>";
+    }
+
+    void DrawClassTypeRO(Class* klass, const char* prefix) {
+        if (!klass) return;
+        std::string name = ClassDisplayNameRO(klass);
+        ImGui::Text("%s %s    [%p]", prefix, name.c_str(), klass);
+    }
+
+    void DrawBaseTypesAndInterfacesRO(Class* klass) {
+        if (!klass || !ImGui::CollapsingHeader("Base Type and Interfaces")) return;
+        if (!ResolveClassMetaRO()) { ImGui::TextDisabled("Mono base/interface APIs are unavailable."); return; }
+        Class* parent = reinterpret_cast<Class*>(gClassParentRO(klass));
+        if (parent) {
+            ImGui::TextDisabled("Base Types");
+            ImGui::Indent(12.0f);
+            int depth = 0;
+            while (parent && depth++ < 64) { DrawClassTypeRO(parent, "[C]"); parent = reinterpret_cast<Class*>(gClassParentRO(parent)); }
+            ImGui::Unindent(12.0f);
+        } else ImGui::TextDisabled("Base Types: none");
+        std::vector<Class*> interfaces;
+        Class* cursor = klass;
+        int baseDepth = 0;
+        while (cursor && baseDepth++ < 64) { CollectInterfacesRO(cursor, interfaces); cursor = reinterpret_cast<Class*>(gClassParentRO(cursor)); }
+        if (!interfaces.empty()) {
+            ImGui::Dummy(ImVec2(0, 4));
+            ImGui::TextDisabled("Interfaces");
+            ImGui::Indent(12.0f);
+            for (Class* interfaceClass : interfaces) DrawClassTypeRO(interfaceClass, "[I]");
+            ImGui::Unindent(12.0f);
+        } else ImGui::TextDisabled("Interfaces: none");
+    }
+}
 
 static MonoGCHandle gMethodResultHandle = nullptr;
 
@@ -753,6 +829,10 @@ void Helper::DrawSidebar(const ImVec2& windowSize) {
     ImGui::SetCursorPosX(14);
     if (Helper::SidebarButton("Search", Globals::currentTab == 1))
         Globals::currentTab = 1;
+    if (Globals::validClassFound && Explorer::pSelectedClass) {
+        ImGui::SetCursorPosX(14);
+        if (Helper::SidebarButton("Class", Globals::currentTab == 3)) Globals::currentTab = 3;
+    }
     if (validObject) {
         ImGui::SetCursorPosX(14);
         if (Helper::SidebarButton("Inspect", Globals::currentTab == 0))
@@ -927,6 +1007,87 @@ void Helper::DrawSearchTab() {
     ImGui::EndChild();
 }
 
+namespace Helper {
+void DrawClassTab() {
+    if (!Globals::validClassFound || !Explorer::pSelectedClass) { Globals::currentTab = 1; return; }
+    Class* klass = Explorer::pSelectedClass;
+    const char* className = mono_class_get_name(klass);
+    const char* classNamespace = mono_class_get_namespace(klass);
+    MonoImage* image = mono_class_get_image(klass);
+    const char* assemblyName = image ? mono_image_get_name(image) : "";
+
+    ImGui::SetCursorPosX(20);
+    ImGui::TextColored(ImVec4(0.95f, 0.96f, 1.0f, 1.0f), "Class");
+    ImGui::SetCursorPosX(20);
+    ImGui::TextDisabled("Explore class metadata without requiring an object instance.");
+    ImGui::Dummy(ImVec2(0, 8));
+    ImGui::SetCursorPosX(20);
+    ImGui::BeginChild("##ClassDetails", ImVec2(ImGui::GetContentRegionAvail().x - 20, ImGui::GetContentRegionAvail().y - 20), true);
+
+    ImGui::Text("Class Information");
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0, 5));
+    ImGui::TextDisabled("Class");
+    ImGui::SameLine(140);
+    ImGui::Text("%s", className ? className : "");
+    ImGui::TextDisabled("Namespace");
+    ImGui::SameLine(140);
+    ImGui::Text("%s", classNamespace && *classNamespace ? classNamespace : "<Global>");
+    ImGui::TextDisabled("Assembly");
+    ImGui::SameLine(140);
+    ImGui::Text("%s", assemblyName ? assemblyName : "");
+    ImGui::TextDisabled("Class Address");
+    ImGui::SameLine(140);
+    ImGui::Text("%p", klass);
+    ImGui::Dummy(ImVec2(0, 8));
+
+    if (ImGui::Button("Dump", ImVec2(90.0f, 30.0f))) ClassDumper::Dump(klass);
+    const char* dumpStatus = ClassDumper::GetStatus();
+    if (dumpStatus && *dumpStatus) {
+        ImGui::SameLine();
+        if (ClassDumper::LastSucceeded()) ImGui::TextColored(ImVec4(0.30f, 0.85f, 0.50f, 1.0f), "%s", dumpStatus);
+        else ImGui::TextDisabled("%s", dumpStatus);
+    }
+
+    ImGui::Dummy(ImVec2(0, 8));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0, 5));
+    DrawBaseTypesAndInterfacesRO(klass);
+
+    if (ImGui::CollapsingHeader("Methods", ImGuiTreeNodeFlags_DefaultOpen)) {
+        void* iter = nullptr;
+        MonoMethod* method = nullptr;
+        while ((method = mono_class_get_methods(klass, &iter)) != nullptr) {
+            const char* name = mono_method_get_name(method);
+            if (name) ImGui::Text("%s", name);
+        }
+    }
+
+    if (ImGui::CollapsingHeader("Fields")) {
+        void* iter = nullptr;
+        MonoField* field = nullptr;
+        while ((field = mono_class_get_fields(klass, &iter)) != nullptr) {
+            const char* name = mono_field_get_name(field);
+            MonoType* type = mono_field_get_type(field);
+            char* typeName = type ? mono_type_get_name(type) : nullptr;
+            ImGui::Text("%s : %s", name ? name : "", typeName ? typeName : "unknown");
+            if (typeName) mono_free(typeName);
+        }
+    }
+
+    if (ImGui::CollapsingHeader("Properties")) {
+        void* iter = nullptr;
+        MonoProperty* property = nullptr;
+        while ((property = mono_class_get_properties(klass, &iter)) != nullptr) {
+            const char* name = mono_property_get_name(property);
+            if (name) ImGui::Text("%s", name);
+        }
+    }
+
+    ImGui::EndChild();
+}
+}
+
 void Helper::DrawUtilitiesTab() {
     static int selectedObjectIndex = -1;
     if (!Explorer::pSelectedObject)
@@ -1014,8 +1175,7 @@ void Helper::DrawUtilitiesTab() {
 }
 
 void Helper::DrawCurrentTab() {
-    if (Globals::currentTab == 0 && !HasValidSelectedObject())
-        Globals::currentTab = 1;
+    if (Globals::currentTab == 0 && !HasValidSelectedObject()) Globals::currentTab = 1;
     switch (Globals::currentTab) {
     case 0:
         DrawInspectTab();
@@ -1025,6 +1185,9 @@ void Helper::DrawCurrentTab() {
         break;
     case 2:
         DrawUtilitiesTab();
+        break;
+    case 3:
+        DrawClassTab();
         break;
     default:
         Globals::currentTab = 1;

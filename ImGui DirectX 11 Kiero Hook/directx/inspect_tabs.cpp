@@ -90,10 +90,10 @@ namespace {
 
     void DrawInspectableType(Class* klass, const char* prefix) {
         if (!klass) return;
-        Object* sourceObject = InspectTabs::GetActiveObject();
         std::string name = ClassDisplayName(klass);
         char label[512];
         sprintf_s(label, "%s %s    [%p]", prefix, name.c_str(), klass);
+        Object* sourceObject = InspectTabs::GetActiveObject();
         ImGui::PushID(klass);
         ImGui::Selectable(label, false);
         if (ImGui::BeginPopupContextItem("##TypeContext")) {
@@ -197,8 +197,10 @@ void InspectTabs::DrawTabBar() {
         if (active) { ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.35f, 0.70f, 1.0f)); ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f)); }
         if (ImGui::Button(name ? name : "<Unknown>", ImVec2(0, 28.0f))) { gActiveTab = static_cast<int>(i); Explorer::pSelectedMethod = nullptr; Explorer::pSelectedField = nullptr; }
         if (active) ImGui::PopStyleColor(2);
-        ImGui::SameLine(0.0f, 2.0f);
-        if (ImGui::Button("x##Close", ImVec2(24.0f, 28.0f))) closeIndex = static_cast<int>(i);
+        if (i > 0) {
+            ImGui::SameLine(0.0f, 2.0f);
+            if (ImGui::Button("x##Close", ImVec2(24.0f, 28.0f))) closeIndex = static_cast<int>(i);
+        }
         ImGui::PopID();
         if (i + 1 < gTabs.size()) ImGui::SameLine(0.0f, 6.0f);
     }

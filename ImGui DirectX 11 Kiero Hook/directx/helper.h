@@ -13,6 +13,7 @@ namespace Helper {
 	void DrawSidebar(const ImVec2& windowSize);
 	void DrawInspectTab();
 	void DrawSearchTab();
+	void DrawClassTab();
 	void DrawUtilitiesTab();
 	void DrawCurrentTab();
 }

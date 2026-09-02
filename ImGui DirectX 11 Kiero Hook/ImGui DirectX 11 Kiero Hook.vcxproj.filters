@@ -81,6 +81,18 @@
     <ClCompile Include="directx\cache.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="directx\hook_manager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="directx\inspect_tabs.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="directx\method_call.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="directx\class_dumper.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="kiero\minhook\dll_resources\MinHook.rc">
@@ -194,6 +206,18 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="directx\cache.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="directx\hook_manager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="directx\inspect_tabs.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="directx\method_call.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="directx\class_dumper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

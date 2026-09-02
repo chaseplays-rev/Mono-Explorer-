@@ -575,15 +575,6 @@ void HookManager::DrawWindows() {
         ImGui::SameLine(125);
         if (hook.enabled) ImGui::TextColored(ImVec4(0.30f, 0.85f, 0.50f, 1.0f), "Enabled");
         else ImGui::TextDisabled("Disabled");
-        ImGui::TextDisabled("MonoMethod");
-        ImGui::SameLine(125);
-        ImGui::Text("%p", hook.method);
-        ImGui::TextDisabled("Target");
-        ImGui::SameLine(125);
-        ImGui::Text("%p", hook.target);
-        ImGui::TextDisabled("Trampoline");
-        ImGui::SameLine(125);
-        ImGui::Text("%p", hook.trampoline);
         ImGui::TextDisabled("Calls");
         ImGui::SameLine(125);
         ImGui::Text("%llu", static_cast<unsigned long long>(hook.callCount.load(std::memory_order_relaxed)));

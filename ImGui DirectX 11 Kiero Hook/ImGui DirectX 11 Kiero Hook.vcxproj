@@ -145,6 +145,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="directx\cache.cpp" />
+    <ClCompile Include="directx\class_dumper.cpp" />
     <ClCompile Include="directx\drawing.cpp" />
     <ClCompile Include="directx\helper.cpp" />
     <ClCompile Include="directx\hook_manager.cpp" />
@@ -176,6 +177,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="directx\cache.h" />
+    <ClInclude Include="directx\class_dumper.h" />
     <ClInclude Include="directx\drawing.h" />
     <ClInclude Include="directx\helper.h" />
     <ClInclude Include="directx\hook_manager.h" />
