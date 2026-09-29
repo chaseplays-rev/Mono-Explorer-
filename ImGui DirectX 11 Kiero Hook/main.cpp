@@ -6,7 +6,7 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
 	FILE* file;
 	freopen_s(&file, "CONOUT$", "w", stdout);
 
-	Mono::Initialize();
+	IL2CPP_API::Initialize();
 
 	bool init_hook = false;
 	do

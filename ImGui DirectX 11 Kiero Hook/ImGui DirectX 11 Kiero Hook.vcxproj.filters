@@ -63,34 +63,13 @@
     <ClCompile Include="directx\present.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="mono\mono.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="directx\menu.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="explorer\explorer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="directx\drawing.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="directx\helper.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="directx\cache.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="directx\hook_manager.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="directx\inspect_tabs.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="directx\method_call.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="directx\class_dumper.cpp">
+    <ClCompile Include="il2cpp\il2cpp.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -157,18 +136,6 @@
     <ClInclude Include="directx\present.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="mono\mono.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="mono\mono_api.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="mono\mono_memory.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="mono\mono_types.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="sdk\class\component.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -193,31 +160,22 @@
     <ClInclude Include="directx\menu.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="explorer\explorer.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="sdk\class\uobject.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="directx\drawing.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="directx\helper.h">
+    <ClInclude Include="il2cpp\il2cpp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="directx\cache.h">
+    <ClInclude Include="il2cpp\il2cpp_memory.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="directx\hook_manager.h">
+    <ClInclude Include="il2cpp\il2cpp_resolver.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="directx\inspect_tabs.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="directx\method_call.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="directx\class_dumper.h">
+    <ClInclude Include="il2cpp\il2cpp_types.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

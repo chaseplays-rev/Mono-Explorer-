@@ -23,7 +23,7 @@
     <ProjectGuid>{04B17470-CB82-4724-904B-25445926AB86}</ProjectGuid>
     <RootNamespace>ImGuiDirectX11KieroHook</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>Mono Explorer</ProjectName>
+    <ProjectName>IL2CPP Explorer</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -144,16 +144,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="directx\cache.cpp" />
-    <ClCompile Include="directx\class_dumper.cpp" />
     <ClCompile Include="directx\drawing.cpp" />
-    <ClCompile Include="directx\helper.cpp" />
-    <ClCompile Include="directx\hook_manager.cpp" />
-    <ClCompile Include="directx\inspect_tabs.cpp" />
     <ClCompile Include="directx\menu.cpp" />
-    <ClCompile Include="directx\method_call.cpp" />
     <ClCompile Include="directx\present.cpp" />
-    <ClCompile Include="explorer\explorer.cpp" />
+    <ClCompile Include="il2cpp\il2cpp.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
     <ClCompile Include="imgui\imgui_demo.cpp" />
     <ClCompile Include="imgui\imgui_draw.cpp" />
@@ -167,7 +161,6 @@
     <ClCompile Include="kiero\minhook\src\hook.c" />
     <ClCompile Include="kiero\minhook\src\trampoline.c" />
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="mono\mono.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="kiero\minhook\dll_resources\MinHook.def" />
@@ -176,16 +169,13 @@
     <ResourceCompile Include="kiero\minhook\dll_resources\MinHook.rc" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="directx\cache.h" />
-    <ClInclude Include="directx\class_dumper.h" />
     <ClInclude Include="directx\drawing.h" />
-    <ClInclude Include="directx\helper.h" />
-    <ClInclude Include="directx\hook_manager.h" />
-    <ClInclude Include="directx\inspect_tabs.h" />
     <ClInclude Include="directx\menu.h" />
-    <ClInclude Include="directx\method_call.h" />
     <ClInclude Include="directx\present.h" />
-    <ClInclude Include="explorer\explorer.h" />
+    <ClInclude Include="il2cpp\il2cpp.h" />
+    <ClInclude Include="il2cpp\il2cpp_memory.h" />
+    <ClInclude Include="il2cpp\il2cpp_resolver.h" />
+    <ClInclude Include="il2cpp\il2cpp_types.h" />
     <ClInclude Include="imgui\imconfig.h" />
     <ClInclude Include="imgui\imgui.h" />
     <ClInclude Include="imgui\imgui_impl_dx11.h" />
@@ -204,10 +194,6 @@
     <ClInclude Include="kiero\minhook\src\hde\table32.h" />
     <ClInclude Include="kiero\minhook\src\hde\table64.h" />
     <ClInclude Include="kiero\minhook\src\trampoline.h" />
-    <ClInclude Include="mono\mono.h" />
-    <ClInclude Include="mono\mono_api.h" />
-    <ClInclude Include="mono\mono_memory.h" />
-    <ClInclude Include="mono\mono_types.h" />
     <ClInclude Include="sdk\class\camera.hpp" />
     <ClInclude Include="sdk\class\component.hpp" />
     <ClInclude Include="sdk\class\list.hpp" />

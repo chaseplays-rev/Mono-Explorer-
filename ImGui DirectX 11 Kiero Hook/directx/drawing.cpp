@@ -2,7 +2,7 @@
 
 namespace Drawing
 {
-    void DrawCachedObjects(ImDrawList* pDrawList)
+   /* void DrawCachedObjects(ImDrawList* pDrawList)
     {
         if (!Globals::highlightObj ||
             !Explorer::pSelectedClass)
@@ -85,12 +85,12 @@ namespace Drawing
                 objTextFull.c_str()
             );
         }
-    }
+    }*/
 
     void Render(ImDrawList* pDrawList)
     {
-        DrawCachedObjects(
+        /*DrawCachedObjects(
             pDrawList
-        );
+        );*/
     }
 }

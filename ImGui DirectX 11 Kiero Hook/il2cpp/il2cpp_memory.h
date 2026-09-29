@@ -4,10 +4,9 @@
 #include <Windows.h>
 #include <TlHelp32.h>
 #include <Psapi.h>
-#include <vector>
-#include "../kiero/minhook/include/MinHook.h"
+#include "minhook/include/MinHook.h"
 
-class MonoMemory {
+class Il2CppMemory {
 public:
 	MODULEENTRY32W GetModule(const wchar_t* modName) {
 		uintptr_t modBaseAddr = 0;
@@ -31,7 +30,7 @@ public:
 		return MODULEENTRY32W();
 	}
 	uintptr_t GetExport(const wchar_t* wAPIName) {
-		unsigned char* lpBase = reinterpret_cast<unsigned char*>(this->Mono.hModule);
+		unsigned char* lpBase = reinterpret_cast<unsigned char*>(this->GameAssembly.hModule);
 		IMAGE_DOS_HEADER* idhDosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(lpBase);
 		if (idhDosHeader->e_magic == 0x5A4D)
 		{
@@ -52,9 +51,11 @@ public:
 		}
 		return 0;
 	}
-
+	MODULEENTRY32W GetModuleEntry() {
+		return this->GameAssembly;
+	}
 	void Initialize() {
-		this->Mono = this->GetModule(L"mono-2.0-bdwgc.dll");
+		this->GameAssembly = this->GetModule(L"GameAssembly.dll");
 	}
 private:
 	bool isEqual(char* names, const wchar_t* API) {
@@ -64,5 +65,5 @@ private:
 
 		return wc.compare(wc2) == 0;
 	}
-	MODULEENTRY32W Mono;
-}inline _MonoMemory;
+	MODULEENTRY32W GameAssembly;
+}inline IL2CPP_MEMORY;
